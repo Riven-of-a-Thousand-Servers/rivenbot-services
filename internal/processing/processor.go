@@ -62,12 +62,12 @@ type Processor interface {
 type PgcrProcessor struct {
 	db       *sql.DB
 	queries  *db.Queries
-	rabbitmq *rabbitmq.RabbitMQ
+	rabbitmq *rabbitmq.RabbitMQ[json.RawMessage]
 	mapper   *mapper.PgcrMapper
 	cache    cache.Service[manifest.ManifestEntry]
 }
 
-func NewProcessor(db *sql.DB, queries *db.Queries, rabbitmq *rabbitmq.RabbitMQ, mapper *mapper.PgcrMapper, redis cache.Service[manifest.ManifestEntry]) *PgcrProcessor {
+func NewProcessor(db *sql.DB, queries *db.Queries, rabbitmq *rabbitmq.RabbitMQ[json.RawMessage], mapper *mapper.PgcrMapper, redis cache.Service[manifest.ManifestEntry]) *PgcrProcessor {
 	return &PgcrProcessor{
 		db:       db,
 		queries:  queries,

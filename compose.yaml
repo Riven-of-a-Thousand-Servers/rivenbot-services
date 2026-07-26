@@ -44,7 +44,7 @@ services:
     build:
       context: .
       tags:
-        - "crawler-service:latest"
+        - "crawler:latest"
       args:
         SERVICE: crawler
     depends_on:

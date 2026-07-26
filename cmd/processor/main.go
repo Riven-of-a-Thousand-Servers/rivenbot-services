@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
@@ -32,7 +33,7 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGQUIT)
 	defer cancel()
 
-	rabbitmq, err := rabbitmq.Connect(rabbitmq1.RabbitQueueName, rabbitmq1.RabbitMQUrl)
+	rabbitmq, err := rabbitmq.New[json.RawMessage](rabbitmq1.RabbitQueueName, rabbitmq1.RabbitMQUrl)
 	if err != nil {
 		slog.Error("Error happened while connecting to RabbitMQ", "error", err)
 		os.Exit(1)

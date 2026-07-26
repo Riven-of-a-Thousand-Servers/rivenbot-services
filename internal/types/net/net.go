@@ -1,6 +1,6 @@
 package net
 
 const (
-	// Max size of 20KB before PGCR is dropped
-	MAX_REQUEST_SIZE_KB = 1024 * 20
+	// Max size of 20MB before PGCR is dropped
+	MaxRequestSizeKB = 1024 * 1024 * 20
 )
