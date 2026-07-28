@@ -23,11 +23,10 @@ import (
 )
 
 var (
-	ipv6interface = flag.String("interface", "eth0", "Ipv6 interface to use")
-	ipv6n         = flag.Int("n", 16, "Number of sequential Ipv6 addresses")
-	port          = flag.Int("port", 8081, "Port to listen on")
-	printAddrs    = flag.Bool("print_addrs", false, "Print Ipv6 addresses")
-	verbose       = flag.Bool("verbose", false, "Print logs")
+	ipv6n      = flag.Int("v6_n", 16, "Number of sequential Ipv6 addresses")
+	port       = flag.Int("port", 8081, "Port to listen on")
+	printAddrs = flag.Bool("print_addrs", false, "Print Ipv6 addresses")
+	verbose    = flag.Bool("verbose", false, "Print logs")
 )
 
 var (
@@ -50,20 +49,12 @@ var (
 	statsPath      string = "Destiny2/Stats/PostGameCarnageReport"
 )
 
-func ReadSecret(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(data)), nil
-}
-
 func main() {
 	flag.Parse()
 
-	addressPath, err := utils.ReadSecret("INITIAL_ADDR")
-	if err != nil {
-		log.Fatal("IPV6 env variable must be passed")
+	addressPath := os.Getenv("INITIAL_ADDR")
+	if addressPath == "" {
+		log.Fatal("INITIAL_ADDR env variable must be passed")
 	}
 
 	address, err := utils.ReadSecret(addressPath)
@@ -71,17 +62,47 @@ func main() {
 		log.Fatalf("Error parsing IPv6 address from docker secret: %v", err)
 	}
 
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		log.Fatalf("Unable to get network interfaces for host: %v", err)
+	}
+
+	_, targetSubnet, err := net.ParseCIDR("2604:a880:4:1d0::/64")
+	if err != nil {
+		log.Fatalf("Unable to parse CIDR block: %v", err)
+	}
+
+	var ipv6interface string
+
+Outer:
+	for _, i := range interfaces {
+		addresses, err := i.Addrs()
+		if err != nil {
+			log.Fatalf("Error reading addresses for interface %s: %v", i.Name, err)
+		}
+		for _, a := range addresses {
+			ip, ok := a.(*net.IPNet)
+			if !ok {
+				log.Fatalf("Cannot assert type *net.IPNet from %T", ip)
+			}
+
+			if targetSubnet.Contains(ip.IP) {
+				ipv6interface = i.Name
+				break Outer
+			}
+		}
+	}
 	addr := netip.MustParseAddr(address)
 
 	for range *ipv6n {
-		cmd := exec.Command("ip", "-6", "addr", "add", fmt.Sprintf("%s/64", addr.String()), "dev", *ipv6interface)
+		cmd := exec.Command("ip", "-6", "addr", "add", fmt.Sprintf("%s/64", addr.String()), "dev", ipv6interface)
 
 		if output, err := cmd.CombinedOutput(); err != nil {
 			if *verbose {
 				log.Printf("Failed to add IP %s: %v | Output: %s", addr.String(), err, string(output))
 			}
 		} else if *verbose {
-			log.Printf("Successfully plumbed %s onto %s", addr.String(), *ipv6interface)
+			log.Printf("Successfully plumbed %s onto %s", addr.String(), ipv6interface)
 		}
 
 		d := &net.Dialer{
@@ -101,7 +122,7 @@ func main() {
 		}
 
 		if *printAddrs {
-			fmt.Printf("sudo ip -6 addr add %s/64 dev %s\n", addr.String(), *ipv6interface)
+			fmt.Printf("ip -6 addr add %s/64 dev %s\n", addr.String(), ipv6interface)
 		}
 
 		proxyTransport.statsRl = append(proxyTransport.statsRl, rate.NewLimiter(rate.Every(time.Second/40), 90))
