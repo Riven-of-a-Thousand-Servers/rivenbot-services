@@ -12,9 +12,9 @@ import (
 
 	"pgcr-processing-service/internal/cache"
 	"pgcr-processing-service/internal/compress"
+	"pgcr-processing-service/internal/consumer"
 	"pgcr-processing-service/internal/db"
 	"pgcr-processing-service/internal/mapper"
-	"pgcr-processing-service/internal/rabbitmq"
 	"pgcr-processing-service/internal/types/manifest"
 	"pgcr-processing-service/internal/types/pgcr"
 	"pgcr-processing-service/internal/utils"
@@ -62,16 +62,16 @@ type Processor interface {
 type PgcrProcessor struct {
 	db       *sql.DB
 	queries  *db.Queries
-	rabbitmq *rabbitmq.RabbitMQ[json.RawMessage]
+	consumer consumer.Consumer[json.RawMessage]
 	mapper   *mapper.PgcrMapper
 	cache    cache.Service[manifest.ManifestEntry]
 }
 
-func NewProcessor(db *sql.DB, queries *db.Queries, rabbitmq *rabbitmq.RabbitMQ[json.RawMessage], mapper *mapper.PgcrMapper, redis cache.Service[manifest.ManifestEntry]) *PgcrProcessor {
+func NewProcessor(db *sql.DB, queries *db.Queries, consumer consumer.Consumer[json.RawMessage], mapper *mapper.PgcrMapper, redis cache.Service[manifest.ManifestEntry]) *PgcrProcessor {
 	return &PgcrProcessor{
 		db:       db,
 		queries:  queries,
-		rabbitmq: rabbitmq,
+		consumer: consumer,
 		mapper:   mapper,
 		cache:    redis,
 	}
@@ -79,18 +79,17 @@ func NewProcessor(db *sql.DB, queries *db.Queries, rabbitmq *rabbitmq.RabbitMQ[j
 
 // StartWork handles messages received from RabbitMQ to process PGCRs into the postgres db
 func (p *PgcrProcessor) StartWork(ctx context.Context, id int) error {
-	d, ch, err := p.rabbitmq.Consumer(ctx, fmt.Sprintf("pgcr_consumer_%d", id))
+	deliveries, err := p.consumer.Consume(ctx)
 	if err != nil {
 		return err
 	}
-	defer ch.Close()
 
 	for {
 		select {
 		case <-ctx.Done():
 			slog.Info("Consumer shutting down", "Id", id)
 			return ctx.Err()
-		case delivery, ok := <-d:
+		case delivery, ok := <-deliveries:
 			if !ok {
 				slog.Info("Delivery channel closed by the broker", "Id", id)
 				return nil
@@ -100,12 +99,12 @@ func (p *PgcrProcessor) StartWork(ctx context.Context, id int) error {
 	}
 }
 
-func (p *PgcrProcessor) handleDelivery(ctx context.Context, delivery amqp091.Delivery) {
+func (p *PgcrProcessor) handleDelivery(ctx context.Context, delivery consumer.Delivery[json.RawMessage]) {
 	var pgcr pgcr.PostGameCarnageReportResponse
-	err := json.Unmarshal(delivery.Body, &pgcr)
+	err := json.Unmarshal(delivery.Item, &pgcr)
 	if err != nil {
 		slog.Error("Error unmarshalling body from message", "Error", err)
-		delivery.Nack(false, false)
+		delivery.Nack(false)
 	}
 
 	instanceId := pgcr.Response.ActivityDetails.InstanceId
@@ -115,7 +114,7 @@ func (p *PgcrProcessor) handleDelivery(ctx context.Context, delivery amqp091.Del
 	// Only process raid activity
 	if pgcr.Response.ActivityDetails.Mode != 4 {
 		slog.Info("Pgcr is not a raid", "pgcr", instanceId, "mode", mode)
-		delivery.Ack(false)
+		delivery.Ack()
 		return
 	}
 
@@ -123,7 +122,7 @@ func (p *PgcrProcessor) handleDelivery(ctx context.Context, delivery amqp091.Del
 	processed, err := p.mapper.ExtractInfo(&pgcr.Response)
 	if err != nil {
 		slog.Error("Error mapping pgcr to a processed pgcr", "instanceId", instanceId, "error", err)
-		delivery.Nack(false, false)
+		delivery.Nack(false)
 		return
 	}
 
@@ -143,7 +142,7 @@ func (p *PgcrProcessor) handleDelivery(ctx context.Context, delivery amqp091.Del
 	tx, err := p.db.BeginTx(ctx, nil)
 	if err != nil {
 		slog.Error("Failed to begin transaction", "error", err)
-		delivery.Nack(false, true)
+		delivery.Nack(false)
 		return
 	}
 	defer tx.Rollback()
@@ -155,7 +154,7 @@ func (p *PgcrProcessor) handleDelivery(ctx context.Context, delivery amqp091.Del
 			slog.Error("Failed to mark ledger entry as failed", "instanceId", instanceId, "error", err)
 		}
 		slog.Error("Error processing pgcr into db", "instanceId", instanceId, "error", err)
-		delivery.Nack(false, true)
+		delivery.Nack(false)
 		return
 	}
 
@@ -164,7 +163,7 @@ func (p *PgcrProcessor) handleDelivery(ctx context.Context, delivery amqp091.Del
 			slog.Error("Failed to mark ledger entry as failed", "instanceId", instanceId, "error", err)
 		}
 		slog.Error("Failed to commit transaction", "instanceId", instanceId, "error", err)
-		delivery.Nack(false, true)
+		delivery.Nack(false)
 		return
 	}
 
@@ -173,7 +172,7 @@ func (p *PgcrProcessor) handleDelivery(ctx context.Context, delivery amqp091.Del
 		slog.Error("Failed to mark ledger entry as processed", "instanceId", instanceId)
 	}
 
-	delivery.Ack(false)
+	delivery.Ack()
 }
 
 func (p *PgcrProcessor) LedgerMarkSuccess(ctx context.Context, instanceId int64) error {

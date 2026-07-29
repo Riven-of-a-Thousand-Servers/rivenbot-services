@@ -139,6 +139,7 @@ func runCrawler(ctx context.Context, config crawlerConfig) error {
 	crawler := crawling.NewPgcrCrawler(factory, &client, in, opts...)
 	for id := range config.Goroutines {
 		wg.Go(func() {
+			slog.Info("Spawning worker", "id", id)
 			crawler.Crawl(ctx, id, config.ApiKey)
 		})
 	}

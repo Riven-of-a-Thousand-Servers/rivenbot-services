@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 
+	"pgcr-processing-service/internal/consumer"
 	"pgcr-processing-service/internal/producer"
 
 	"github.com/rabbitmq/amqp091-go"
@@ -87,36 +88,53 @@ func (i *rabbitProducerCloser[T]) Produce(ctx context.Context, item T) error {
 
 // Instantiate a queue
 // The name parameter declares the name of the consumer
-func (r *RabbitMQ[T]) OpenDeliveryCh(ctx context.Context, consumerName string) (<-chan amqp091.Delivery, *amqp091.Channel, error) {
+func (r *RabbitMQ[T]) Consume(ctx context.Context) (<-chan consumer.Delivery[T], error) {
 	ch, err := r.Conn.Channel()
 	if err != nil {
-		slog.Error("Failed to open amqp channel", "error", err, "consumer", consumerName)
-		return nil, nil, err
+		slog.Error("Failed to open amqp channel for consumer", "error", err)
+		return nil, err
 	}
 
-	delivery, err := ch.ConsumeWithContext(ctx, r.Queue.Name, consumerName, false, false, false, false, nil)
+	deliveries, err := ch.ConsumeWithContext(ctx, r.Queue.Name, "pgcr-consumer", false, false, false, false, nil)
 	if err != nil {
 		slog.Error("Error declaring consumer for RabbitMQ", "Error", err)
-		return nil, nil, err
+		return nil, err
 	}
 
-	return delivery, ch, nil
-}
+	out := make(chan consumer.Delivery[T])
+	go func() {
+		defer close(out)
+		defer ch.Close()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case d, ok := <-deliveries:
+				if !ok {
+					return
+				}
 
-// Instantiate a queue Consumer
-// The name parameter declares the name of the consumer
-func (r *RabbitMQ[T]) Consumer(ctx context.Context, consumerName string) (<-chan amqp091.Delivery, *amqp091.Channel, error) {
-	ch, err := r.Conn.Channel()
-	if err != nil {
-		slog.Error("Failed to open amqp channel", "error", err, "consumer", consumerName)
-		return nil, nil, err
-	}
+				var item T
+				if err := json.Unmarshal(d.Body, &item); err != nil {
+					slog.Error("Failed to unmarshal delivery, nacking", "error", err)
+					d.Nack(false, false)
+					continue
+				}
 
-	delivery, err := ch.ConsumeWithContext(ctx, r.Queue.Name, consumerName, false, false, false, false, nil)
-	if err != nil {
-		slog.Error("Error declaring consumer for RabbitMQ", "Error", err)
-		return nil, nil, err
-	}
+				delivery := consumer.Delivery[T]{
+					Item: item,
+					Ack:  func() error { return d.Ack(false) },
+					Nack: func(requeue bool) error { return d.Nack(false, requeue) },
+				}
 
-	return delivery, ch, nil
+				select {
+				case out <- delivery:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+
+	return out, nil
 }
