@@ -20,18 +20,20 @@ import (
 	"pgcr-processing-service/internal/stdout"
 	"pgcr-processing-service/internal/transport"
 	"pgcr-processing-service/internal/types/net"
-	types "pgcr-processing-service/internal/types/rabbitmq"
 
 	"github.com/spf13/cobra"
 )
 
 type crawlerConfig struct {
-	Goroutines int
-	ApiKey     string
-	Interval   int
-	Offset     int64
-	BaseUrl    string
-	Noop       bool
+	Goroutines    int
+	ApiKey        string
+	Interval      int
+	Offset        int64
+	BaseUrl       string
+	RabbitMQUrl   string
+	RabbitMQQueue string
+	QueueName     string
+	Noop          bool
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -63,6 +65,8 @@ to have up-to-date information regarding player's raids statistics`,
 	flags.StringVarP(&config.ApiKey, "api-key", "a", "", "Bungie API key")
 	flags.IntVarP(&config.Interval, "interval", "i", 10, "Duration in-between requests to Bungie")
 	flags.Int64VarP(&config.Offset, "offset", "o", 0, "PGCR scraping offset (Initial point to start fetching PGCRs)")
+	flags.StringVar(&config.RabbitMQUrl, "rabbitmq-url", "", "RabbitMQ URL for publishing PGCRs")
+	flags.StringVar(&config.RabbitMQQueue, "rabbitmq-queue", "", "RabbitMQ queue name")
 	flags.BoolVar(&config.Noop, "noop", false, "Swap out producer implementation for a no-op producer that prints to Stdout")
 
 	return cmd
@@ -78,7 +82,17 @@ func runCrawler(ctx context.Context, config crawlerConfig) error {
 		noOpFactory := stdout.NewFactory[json.RawMessage]()
 		factory = noOpFactory
 	default:
-		rmqFactory, err := rabbitmq.New[json.RawMessage](types.RabbitQueueName, types.RabbitMQUrl)
+		if config.RabbitMQQueue == "" {
+			slog.Error("No RabbitMQ queue declared")
+			os.Exit(1)
+		}
+
+		if config.RabbitMQUrl == "" {
+			slog.Error("No valid RabbitMQ URL")
+			os.Exit(1)
+		}
+
+		rmqFactory, err := rabbitmq.New[json.RawMessage](config.RabbitMQQueue, config.RabbitMQUrl)
 		if err != nil {
 			slog.Error("Error happened while connecting to RabbitMQ", "error", err)
 			return err
