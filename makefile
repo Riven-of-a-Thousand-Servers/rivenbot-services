@@ -3,6 +3,7 @@ POSTGRES_PASSWORD:=password
 GIT_SHA:=$(shell git rev-parse --short HEAD)
 CRAWLER_IMAGE_NAME:=rivenbot/crawler
 PROXY_IMAGE_NAME:=rivenbot/proxy
+PROCESSOR_IMAGE_NAME:=rivenbot/processor
 
 export
 
@@ -23,6 +24,21 @@ build-proxy:
 push-proxy: build-proxy
 	docker push $(PROXY_IMAGE_NAME):latest
 	docker push $(PROXY_IMAGE_NAME):$(GIT_SHA)
+
+.PHONY: build-processor
+build-processor:
+	docker buildx build --platform linux/arm64,linux/amd64 -t $(PROCESSOR_IMAGE_NAME):latest -t $(PROCESSOR_IMAGE_NAME):$(GIT_SHA) --build-arg SERVICE=processor .
+
+.PHONY: push-processor
+push-processor: build-processor
+	docker push $(PROCESSOR_IMAGE_NAME):latest
+	docker push $(PROCESSOR_IMAGE_NAME):$(GIT_SHA)
+
+.PHONY: build-all
+build-all: build-processor build-crawler build-proxy
+
+.PHONY: push-all
+push-all: push-processor push-crawler push-proxy
 
 .PHONY: migrate
 build-migrate:

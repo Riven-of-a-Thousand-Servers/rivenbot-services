@@ -55,25 +55,23 @@ var statuses map[Status]string = map[Status]string{
 
 const staleThreshold = 5 * time.Minute
 
-type Processor interface {
-	DoPgcr(pgcr.PgcrInfo) error
-}
-
 type PgcrProcessor struct {
-	db       *sql.DB
-	queries  *db.Queries
-	consumer consumer.Consumer[json.RawMessage]
-	mapper   *mapper.PgcrMapper
-	cache    cache.Service[manifest.ManifestEntry]
+	db          *sql.DB
+	Concurrency int
+	queries     *db.Queries
+	consumer    consumer.Consumer[json.RawMessage]
+	mapper      *mapper.PgcrMapper
+	cache       cache.Service[manifest.ManifestEntry]
 }
 
-func NewProcessor(db *sql.DB, queries *db.Queries, consumer consumer.Consumer[json.RawMessage], mapper *mapper.PgcrMapper, redis cache.Service[manifest.ManifestEntry]) *PgcrProcessor {
+func NewProcessor(db *sql.DB, queries *db.Queries, consumer consumer.Consumer[json.RawMessage], mapper *mapper.PgcrMapper, redis cache.Service[manifest.ManifestEntry], concurrency int) *PgcrProcessor {
 	return &PgcrProcessor{
-		db:       db,
-		queries:  queries,
-		consumer: consumer,
-		mapper:   mapper,
-		cache:    redis,
+		db:          db,
+		queries:     queries,
+		consumer:    consumer,
+		mapper:      mapper,
+		cache:       redis,
+		Concurrency: concurrency,
 	}
 }
 
@@ -135,7 +133,7 @@ func (p *PgcrProcessor) handleDelivery(ctx context.Context, delivery consumer.De
 	source, err := extractSource(delivery.Headers)
 	if err != nil {
 		slog.Warn("Unable to extract PGCR source from amqp headers", "error", err)
-		delivery.Nack(false, false)
+		delivery.Nack(false)
 		return
 	}
 

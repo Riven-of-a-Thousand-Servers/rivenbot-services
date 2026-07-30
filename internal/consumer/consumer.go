@@ -6,9 +6,10 @@ import "context"
 // we wrap around Ack and Nack functionality so we don't lose these
 // when unwrapping the types
 type Delivery[T any] struct {
-	Item T
-	Ack  func() error
-	Nack func(requeue bool) error
+	Item    T
+	Headers map[string]any
+	Ack     func() error
+	Nack    func(requeue bool) error
 }
 
 type Consumer[T any] interface {

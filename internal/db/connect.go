@@ -6,7 +6,6 @@ import (
 	"embed"
 	"fmt"
 	"log/slog"
-	"os"
 	"sync"
 
 	"github.com/pressly/goose/v3"
@@ -25,15 +24,8 @@ func init() {
 }
 
 // Connect to Postgres Database with the required parameters
-func Connect(ctx context.Context, baseUrl string) (*sql.DB, error) {
-	username := os.Getenv("POSTGRES_USERNAME")
-	password := os.Getenv("POSTGRES_PASSWORD")
-
-	if username == "" || password == "" {
-		return nil, fmt.Errorf("Unable to load required parameters to connect to Postgres")
-	}
-
-	db, err := openDB(fmt.Sprintf(baseUrl, username, password))
+func Connect(ctx context.Context, url string) (*sql.DB, error) {
+	db, err := openDB(url)
 	if err != nil {
 		return nil, err
 	}

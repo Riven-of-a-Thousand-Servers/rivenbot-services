@@ -27,10 +27,10 @@ import (
 )
 
 type processorConfig struct {
-	DBUrl         string
 	RedisUrl      string
 	RabbitMQUrl   string
 	RabbitMQQueue string
+	DatasourceUrl string
 	Goroutines    int
 }
 
@@ -43,12 +43,16 @@ func newProcessCommand() *cobra.Command {
 		Long: `Processor service fetches PGCRs published by the Crawler from whichever
 	Publisher is configured and saves it to a database`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runProcessor(cmd.Context(), config)
+			processor, err := buildProcessor(cmd.Context(), config)
+			if err != nil {
+				return err
+			}
+			return runProcessor(cmd.Context(), processor)
 		},
 	}
 
 	flags := rootCmd.Flags()
-	flags.StringVar(&config.DBUrl, "database-url", "", "Database URL to connect to")
+	flags.StringVar(&config.DatasourceUrl, "database-url", "", "Database URL to connect to")
 	flags.StringVar(&config.RedisUrl, "redis-url", "", "URL to reach Redis")
 	flags.IntVar(&config.Goroutines, "goroutines", 1, "Number of goroutines to spin up")
 	flags.StringVar(&config.RabbitMQUrl, "rabbitmq-url", "", "URL to reach RabbitMQ")
@@ -57,10 +61,7 @@ func newProcessCommand() *cobra.Command {
 	return rootCmd
 }
 
-func runProcessor(ctx context.Context, config processorConfig) error {
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGQUIT)
-	defer cancel()
-
+func buildProcessor(ctx context.Context, config processorConfig) (*processing.PgcrProcessor, error) {
 	rabbitmq, err := rabbitmq.New[json.RawMessage](config.RabbitMQQueue, config.RabbitMQUrl)
 	if err != nil {
 		slog.Error("Error happened while connecting to RabbitMQ", "error", err)
@@ -68,7 +69,7 @@ func runProcessor(ctx context.Context, config processorConfig) error {
 	}
 	defer rabbitmq.Conn.Close()
 
-	conn, err := db.Connect(ctx, config.DBUrl)
+	conn, err := db.Connect(ctx, config.DatasourceUrl)
 	if err != nil {
 		slog.Error("Error happened while connecting to DB", "error", err)
 		os.Exit(1)
@@ -91,10 +92,15 @@ func runProcessor(ctx context.Context, config processorConfig) error {
 
 	cacheService := cache.NewService(redis, 12*time.Hour, bungie.BungieManifestFetcher[manifest.ManifestEntry](http.DefaultClient, ""))
 	mapper := mapper.New(cacheService)
-	processor := processing.NewProcessor(conn, queries, rabbitmq, mapper, cacheService)
+	return processing.NewProcessor(conn, queries, rabbitmq, mapper, cacheService, config.Goroutines), nil
+}
+
+func runProcessor(ctx context.Context, processor *processing.PgcrProcessor) error {
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGQUIT)
+	defer cancel()
 
 	var wg sync.WaitGroup
-	for i := range config.Goroutines {
+	for i := range processor.Concurrency {
 		wg.Go(func() {
 			slog.Info("Starting worker", "Id", i)
 			_ = processor.StartWork(ctx, i)
