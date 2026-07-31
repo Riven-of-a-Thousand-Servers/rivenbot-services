@@ -62,9 +62,16 @@ type PgcrProcessor struct {
 	consumer    consumer.Consumer[json.RawMessage]
 	mapper      *mapper.PgcrMapper
 	cache       cache.Service[manifest.ManifestEntry]
+	noop        bool
 }
 
-func NewProcessor(db *sql.DB, queries *db.Queries, consumer consumer.Consumer[json.RawMessage], mapper *mapper.PgcrMapper, redis cache.Service[manifest.ManifestEntry], concurrency int) *PgcrProcessor {
+func NewProcessor(db *sql.DB, queries *db.Queries,
+	consumer consumer.Consumer[json.RawMessage],
+	mapper *mapper.PgcrMapper,
+	redis cache.Service[manifest.ManifestEntry],
+	concurrency int,
+	noop bool,
+) *PgcrProcessor {
 	return &PgcrProcessor{
 		db:          db,
 		queries:     queries,
@@ -92,12 +99,12 @@ func (p *PgcrProcessor) StartWork(ctx context.Context, id int) error {
 				slog.Info("Delivery channel closed by the broker", "Id", id)
 				return nil
 			}
-			p.handleDelivery(ctx, delivery)
+			p.handleDelivery(ctx, delivery, p.noop)
 		}
 	}
 }
 
-func (p *PgcrProcessor) handleDelivery(ctx context.Context, delivery consumer.Delivery[json.RawMessage]) {
+func (p *PgcrProcessor) handleDelivery(ctx context.Context, delivery consumer.Delivery[json.RawMessage], noop bool) {
 	var pgcr pgcr.PostGameCarnageReportResponse
 	err := json.Unmarshal(delivery.Item, &pgcr)
 	if err != nil {
@@ -108,6 +115,11 @@ func (p *PgcrProcessor) handleDelivery(ctx context.Context, delivery consumer.De
 	instanceId := pgcr.Response.ActivityDetails.InstanceId
 	instanceId64, _ := strconv.ParseInt(instanceId, 10, 64)
 	mode := pgcr.Response.ActivityDetails.Mode
+
+	if noop {
+		slog.Info("Processed Pgcr!", "instaceId", instanceId)
+		return
+	}
 
 	// Only process raid activity
 	if pgcr.Response.ActivityDetails.Mode != 4 {

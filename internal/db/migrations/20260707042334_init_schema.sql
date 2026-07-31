@@ -153,6 +153,8 @@ DROP TABLE IF EXISTS instance_player;
 
 DROP INDEX CONCURRENTLY IF EXISTS destiny_player_display_name_idx;
 
+DROP TABLE IF EXISTS pgcr;
+
 DROP TABLE IF EXISTS destiny_player;
 
 DROP TABLE IF EXISTS instance;
@@ -162,5 +164,3 @@ DROP TABLE IF EXISTS activity;
 DROP TABLE IF EXISTS activity_difficulty;
 
 DROP TABLE IF EXISTS activity_name;
-
-DROP TABLE IF EXISTS pgcr;

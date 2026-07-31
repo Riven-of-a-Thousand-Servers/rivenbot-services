@@ -25,6 +25,11 @@ func init() {
 
 // Connect to Postgres Database with the required parameters
 func Connect(ctx context.Context, url string) (*sql.DB, error) {
+	dialect, _, err := detectDriver(url)
+	if err != nil {
+		return nil, err
+	}
+
 	db, err := openDB(url)
 	if err != nil {
 		return nil, err
@@ -35,7 +40,7 @@ func Connect(ctx context.Context, url string) (*sql.DB, error) {
 		return nil, fmt.Errorf("Failed to connect to database: %w", err)
 	}
 
-	if err := initGoose(); err != nil {
+	if err := initGoose(dialect); err != nil {
 		slog.Error("Failed to initialize Goose", "error", err)
 		return nil, err
 	}
@@ -48,10 +53,10 @@ func Connect(ctx context.Context, url string) (*sql.DB, error) {
 	return db, nil
 }
 
-func initGoose() error {
+func initGoose(dialect string) error {
 	gooseOnce.Do(func() {
 		goose.SetBaseFS(fs)
-		gooseInitErr = goose.SetDialect("pgx")
+		gooseInitErr = goose.SetDialect(dialect)
 	})
 	return gooseInitErr
 }

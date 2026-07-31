@@ -4,11 +4,14 @@ import (
 	"database/sql"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
+
+var dataDirectory = "/data"
 
 func detectDriver(dsn string) (driver string, connStr string, err error) {
 	u, err := url.Parse(dsn)
@@ -20,7 +23,11 @@ func detectDriver(dsn string) (driver string, connStr string, err error) {
 	case "postgres", "postgresql":
 		return "pgx", dsn, nil
 	case "sqlite", "sqlite3":
-		return "sqlite3", strings.TrimPrefix(dsn, "sqlite://"), nil
+		err := os.MkdirAll(dataDirectory, 0o755)
+		if err != nil {
+			return "", "", err
+		}
+		return "sqlite", strings.TrimPrefix(dsn, "sqlite://"), nil
 	default:
 		return "", "", fmt.Errorf("Unsupported driver: %s", u.Scheme)
 	}
