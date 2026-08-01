@@ -79,6 +79,7 @@ func NewProcessor(db *sql.DB, queries *db.Queries,
 		mapper:      mapper,
 		cache:       redis,
 		Concurrency: concurrency,
+		noop:        noop,
 	}
 }
 
@@ -99,12 +100,12 @@ func (p *PgcrProcessor) StartWork(ctx context.Context, id int) error {
 				slog.Info("Delivery channel closed by the broker", "Id", id)
 				return nil
 			}
-			p.handleDelivery(ctx, delivery, p.noop)
+			p.handleDelivery(ctx, delivery)
 		}
 	}
 }
 
-func (p *PgcrProcessor) handleDelivery(ctx context.Context, delivery consumer.Delivery[json.RawMessage], noop bool) {
+func (p *PgcrProcessor) handleDelivery(ctx context.Context, delivery consumer.Delivery[json.RawMessage]) {
 	var pgcr pgcr.PostGameCarnageReportResponse
 	err := json.Unmarshal(delivery.Item, &pgcr)
 	if err != nil {
@@ -116,7 +117,7 @@ func (p *PgcrProcessor) handleDelivery(ctx context.Context, delivery consumer.De
 	instanceId64, _ := strconv.ParseInt(instanceId, 10, 64)
 	mode := pgcr.Response.ActivityDetails.Mode
 
-	if noop {
+	if p.noop {
 		slog.Info("Processed Pgcr!", "instaceId", instanceId)
 		return
 	}
