@@ -119,6 +119,7 @@ func (p *PgcrProcessor) handleDelivery(ctx context.Context, delivery consumer.De
 
 	if p.noop {
 		slog.Info("Processed Pgcr!", "instaceId", instanceId)
+		delivery.Ack()
 		return
 	}
 
