@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	manifestUrl  = "https://www.bungie.net/Platform/Destiny2/Manifest/%s/%s/"
+	manifestUrl  = "http://proxy:8081/Platform/Destiny2/Manifest/%s/%s/"
 	apiKeyHeader = "x-api-key"
 )
 

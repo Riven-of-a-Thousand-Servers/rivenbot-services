@@ -78,7 +78,7 @@ func (p *PgcrMapper) enrichPgcrInfo(report *pgcr.PostGameCarnageReport) (*pgcr.P
 
 	raidName, raidDifficulty, err := utils.GetRaidAndDifficulty(manifestResponse.DisplayProperties.Name)
 	if err != nil {
-		slog.Error("Unable to parse activity raid name and raid difficulty")
+		slog.Error("Unable to parse activity raid name and raid difficulty", "error", err)
 		return nil, err
 	}
 
