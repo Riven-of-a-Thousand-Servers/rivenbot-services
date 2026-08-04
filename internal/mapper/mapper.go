@@ -14,10 +14,10 @@ import (
 )
 
 type PgcrMapper struct {
-	cache cache.Service[manifest.ManifestEntry]
+	cache cache.Service[manifest.Response]
 }
 
-func New(cache cache.Service[manifest.ManifestEntry]) *PgcrMapper {
+func New(cache cache.Service[manifest.Response]) *PgcrMapper {
 	return &PgcrMapper{
 		cache: cache,
 	}
@@ -70,13 +70,13 @@ func (p *PgcrMapper) enrichPgcrInfo(report *pgcr.PostGameCarnageReport) (*pgcr.P
 	entity.ActivityHash = report.ActivityDetails.ActivityHash
 	activitiyHash := report.ActivityDetails.ActivityHash
 
-	manifestResponse, err := p.cache.Get(context.Background(), "DestinyActivityDefinition", strconv.FormatInt(activitiyHash, 10))
+	res, err := p.cache.Get(context.Background(), "DestinyActivityDefinition", strconv.FormatInt(activitiyHash, 10))
 	if err != nil {
 		slog.Error("Unable to find activity hash in Redis", "ActivityHash", activitiyHash, "Error", err)
 		return nil, err
 	}
 
-	raidName, raidDifficulty, err := utils.GetRaidAndDifficulty(manifestResponse.DisplayProperties.Name)
+	raidName, raidDifficulty, err := utils.GetRaidAndDifficulty(res.Response.DisplayProperties.Name)
 	if err != nil {
 		slog.Error("Unable to parse activity raid name and raid difficulty", "error", err)
 		return nil, err

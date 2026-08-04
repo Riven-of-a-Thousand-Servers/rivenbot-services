@@ -82,7 +82,7 @@ func newProcessCommand() *cobra.Command {
 				})
 				defer redis.Close()
 
-				cacheService := cache.NewService(redis, 12*time.Hour, bungie.BungieManifestFetcher[manifest.ManifestEntry](http.DefaultClient, ""))
+				cacheService := cache.NewService(redis, 12*time.Hour, bungie.BungieManifestFetcher[manifest.Response](http.DefaultClient, ""))
 				mapper := mapper.New(cacheService)
 
 				processor = process.NewProcessor(conn, queries, rabbitmq, mapper, cacheService, config.Goroutines)

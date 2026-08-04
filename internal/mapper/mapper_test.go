@@ -14,9 +14,9 @@ import (
 )
 
 func TestExtractInfo_ShouldWorkForAPIPgcr(t *testing.T) {
-	mockCache := new(mockCacheService[manifest.ManifestEntry])
+	mockCache := new(mockCacheService[manifest.Response])
 	mockCache.On("Get", mock.Anything, mock.Anything, mock.Anything).
-		Return(manifest.ManifestEntry{DisplayProperties: manifest.DisplayProperties{Name: "Last Wish"}}, nil)
+		Return(manifest.Response{Response: manifest.Entry{DisplayProperties: manifest.DisplayProperties{Name: "Last Wish"}}}, nil)
 
 	pgcr := openPgcr(t, "beyond_light_pgcr.json")
 	sut := New(mockCache)
@@ -32,9 +32,9 @@ func TestExtractInfo_ShouldWorkForAPIPgcr(t *testing.T) {
 }
 
 func TestExtractInfo_ShouldWorkForDatasetPgcr(t *testing.T) {
-	mockCache := new(mockCacheService[manifest.ManifestEntry])
+	mockCache := new(mockCacheService[manifest.Response])
 	mockCache.On("Get", mock.Anything, mock.Anything, mock.Anything).
-		Return(manifest.ManifestEntry{DisplayProperties: manifest.DisplayProperties{Name: "Last Wish"}}, nil)
+		Return(manifest.Response{Response: manifest.Entry{DisplayProperties: manifest.DisplayProperties{Name: "Last Wish"}}}, nil)
 
 	pgcr := openPgcr(t, "beyond_light_pgcr.json")
 	sut := New(mockCache)

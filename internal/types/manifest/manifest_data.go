@@ -1,6 +1,10 @@
 package manifest
 
-type ManifestEntry struct {
+type Response struct {
+	Response Entry `json:"Response"`
+}
+
+type Entry struct {
 	Mode                      int               `json:"directActivityModeType"`
 	DisplayProperties         DisplayProperties `json:"displayProperties"`
 	OriginalDisplayProperties DisplayProperties `json:"originalDisplayProperties"`

@@ -61,14 +61,14 @@ type PgcrProcessor struct {
 	queries     *db.Queries
 	consumer    consumer.Consumer[json.RawMessage]
 	mapper      *mapper.PgcrMapper
-	cache       cache.Service[manifest.ManifestEntry]
+	cache       cache.Service[manifest.Response]
 }
 
 func NewProcessor(db *sql.DB,
 	queries *db.Queries,
 	consumer consumer.Consumer[json.RawMessage],
 	mapper *mapper.PgcrMapper,
-	redis cache.Service[manifest.ManifestEntry],
+	redis cache.Service[manifest.Response],
 	concurrency int,
 ) *PgcrProcessor {
 	return &PgcrProcessor{
@@ -343,10 +343,10 @@ func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcr.Pg
 
 				if err := p.queries.CreateWeapon(ctx, db.CreateWeaponParams{
 					WeaponHash:    ciw.WeaponHash,
-					IconUrl:       manifestEntity.DisplayProperties.Icon,
-					WeaponName:    manifestEntity.DisplayProperties.Name,
-					DamageType:    string(utils.GetDamageType(manifestEntity.EquippingBlock.AmmoType)),
-					EquipmentSlot: string(utils.GetEquippingSlot(manifestEntity.EquippingBlock.EquipmentSlotTypeHash)),
+					IconUrl:       manifestEntity.Response.DisplayProperties.Icon,
+					WeaponName:    manifestEntity.Response.DisplayProperties.Name,
+					DamageType:    string(utils.GetDamageType(manifestEntity.Response.EquippingBlock.AmmoType)),
+					EquipmentSlot: string(utils.GetEquippingSlot(manifestEntity.Response.EquippingBlock.EquipmentSlotTypeHash)),
 				}); err != nil {
 					slog.Error("Failed to save weapon", "weaponId", strHash)
 					return err
