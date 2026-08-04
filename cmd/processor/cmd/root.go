@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -18,26 +19,18 @@ import (
 	"pgcr-processing-service/internal/cache"
 	"pgcr-processing-service/internal/db"
 	"pgcr-processing-service/internal/mapper"
-	"pgcr-processing-service/internal/processing"
+	"pgcr-processing-service/internal/process"
 	"pgcr-processing-service/internal/rabbitmq"
 	"pgcr-processing-service/internal/types/manifest"
+	"pgcr-processing-service/internal/utils"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/spf13/cobra"
 )
 
-type processorConfig struct {
-	RedisUrl      string
-	RabbitMQUrl   string
-	RabbitMQQueue string
-	DatasourceUrl string
-	Goroutines    int
-	Noop          bool
-}
-
 // rootCmd represents the base command when called without any subcommands
 func newProcessCommand() *cobra.Command {
-	var config processorConfig
+	var config process.ProcessorConfig
 	rootCmd := &cobra.Command{
 		Use:   "processor",
 		Short: "PGCR processor service for Rivenbot",
@@ -45,7 +38,8 @@ func newProcessCommand() *cobra.Command {
 	Publisher is configured and saves it to a database`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			var processor *processing.PgcrProcessor
+
+			var processor *process.PgcrProcessor
 			rabbitmq, err := rabbitmq.New[json.RawMessage](config.RabbitMQQueue, config.RabbitMQUrl)
 			if err != nil {
 				slog.Error("Error happened while connecting to RabbitMQ", "error", err)
@@ -56,8 +50,17 @@ func newProcessCommand() *cobra.Command {
 			// Switch if Noop is passed in
 			switch {
 			case config.Noop:
-				processor = processing.NewProcessor(nil, nil, rabbitmq, nil, nil, config.Goroutines, config.Noop)
+				processor = process.NoOpProcessor(rabbitmq, config.Goroutines)
 			default:
+				// Check for docker secret notation, e.g., /run/secret/${my_secret}
+				if strings.HasPrefix(config.DatasourceUrl, "/") {
+					config.DatasourceUrl, err = utils.ReadSecret(config.DatasourceUrl)
+					if err != nil {
+						slog.Error("Error while reading data source URL from within docker secret", "error", err)
+						os.Exit(1)
+					}
+				}
+
 				conn, err := db.Connect(ctx, config.DatasourceUrl)
 				if err != nil {
 					slog.Error("Error happened while connecting to DB", "error", err)
@@ -82,9 +85,9 @@ func newProcessCommand() *cobra.Command {
 				cacheService := cache.NewService(redis, 12*time.Hour, bungie.BungieManifestFetcher[manifest.ManifestEntry](http.DefaultClient, ""))
 				mapper := mapper.New(cacheService)
 
-				processor = processing.NewProcessor(conn, queries, rabbitmq, mapper, cacheService, config.Goroutines, false)
+				processor = process.NewProcessor(conn, queries, rabbitmq, mapper, cacheService, config.Goroutines)
 			}
-			return runProcessor(cmd.Context(), processor)
+			return runProcessor(cmd.Context(), processor, config.Noop)
 		},
 	}
 
@@ -99,7 +102,7 @@ func newProcessCommand() *cobra.Command {
 	return rootCmd
 }
 
-func runProcessor(ctx context.Context, processor *processing.PgcrProcessor) error {
+func runProcessor(ctx context.Context, processor *process.PgcrProcessor, noop bool) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGQUIT)
 	defer cancel()
 
@@ -107,7 +110,7 @@ func runProcessor(ctx context.Context, processor *processing.PgcrProcessor) erro
 	for i := range processor.Concurrency {
 		wg.Go(func() {
 			slog.Info("Starting worker", "Id", i)
-			err := processor.StartWork(ctx, i)
+			err := processor.StartWork(ctx, i, noop)
 			if err != nil {
 				slog.Error("Something bad happened", "error", err)
 			}

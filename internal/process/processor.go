@@ -1,4 +1,4 @@
-package processing
+package process
 
 import (
 	"context"
@@ -62,15 +62,14 @@ type PgcrProcessor struct {
 	consumer    consumer.Consumer[json.RawMessage]
 	mapper      *mapper.PgcrMapper
 	cache       cache.Service[manifest.ManifestEntry]
-	noop        bool
 }
 
-func NewProcessor(db *sql.DB, queries *db.Queries,
+func NewProcessor(db *sql.DB,
+	queries *db.Queries,
 	consumer consumer.Consumer[json.RawMessage],
 	mapper *mapper.PgcrMapper,
 	redis cache.Service[manifest.ManifestEntry],
 	concurrency int,
-	noop bool,
 ) *PgcrProcessor {
 	return &PgcrProcessor{
 		db:          db,
@@ -79,12 +78,15 @@ func NewProcessor(db *sql.DB, queries *db.Queries,
 		mapper:      mapper,
 		cache:       redis,
 		Concurrency: concurrency,
-		noop:        noop,
 	}
 }
 
+func NoOpProcessor(c consumer.Consumer[json.RawMessage], goroutines int) *PgcrProcessor {
+	return &PgcrProcessor{consumer: c, Concurrency: goroutines}
+}
+
 // StartWork handles messages received from RabbitMQ to process PGCRs into the postgres db
-func (p *PgcrProcessor) StartWork(ctx context.Context, id int) error {
+func (p *PgcrProcessor) StartWork(ctx context.Context, id int, noop bool) error {
 	deliveries, err := p.consumer.Consume(ctx)
 	if err != nil {
 		return err
@@ -100,12 +102,12 @@ func (p *PgcrProcessor) StartWork(ctx context.Context, id int) error {
 				slog.Info("Delivery channel closed by the broker", "Id", id)
 				return nil
 			}
-			p.handleDelivery(ctx, delivery)
+			p.handleDelivery(ctx, delivery, noop)
 		}
 	}
 }
 
-func (p *PgcrProcessor) handleDelivery(ctx context.Context, delivery consumer.Delivery[json.RawMessage]) {
+func (p *PgcrProcessor) handleDelivery(ctx context.Context, delivery consumer.Delivery[json.RawMessage], noop bool) {
 	var pgcr pgcr.PostGameCarnageReportResponse
 	err := json.Unmarshal(delivery.Item, &pgcr)
 	if err != nil {
@@ -117,7 +119,7 @@ func (p *PgcrProcessor) handleDelivery(ctx context.Context, delivery consumer.De
 	instanceId64, _ := strconv.ParseInt(instanceId, 10, 64)
 	mode := pgcr.Response.ActivityDetails.Mode
 
-	if p.noop {
+	if noop {
 		slog.Info("Processed Pgcr!", "instaceId", instanceId)
 		delivery.Ack()
 		return

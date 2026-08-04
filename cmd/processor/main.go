@@ -1,5 +1,5 @@
 /*
-Copyright © 2026 NAME HERE <EMAIL ADDRESS>
+Copyright © 2026 Daniel Villavicencio <dvm3099@pm.me>
 */
 package main
 

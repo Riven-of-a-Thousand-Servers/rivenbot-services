@@ -73,7 +73,6 @@ func main() {
 	}
 
 	var ipv6interface string
-
 Outer:
 	for _, i := range interfaces {
 		addresses, err := i.Addrs()
