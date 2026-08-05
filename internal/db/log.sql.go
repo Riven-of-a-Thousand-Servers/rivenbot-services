@@ -10,6 +10,61 @@ import (
 	"database/sql"
 )
 
+const claimLogEntryForProcessing = `-- name: ClaimLogEntryForProcessing :one
+UPDATE ingestion_log
+SET status = 'processing', last_attempt_at = now()
+WHERE instance_id = $1 AND status = $2
+RETURNING instance_id, status
+`
+
+type ClaimLogEntryForProcessingParams struct {
+	InstanceID int64  `json:"instance_id"`
+	Status     string `json:"status"`
+}
+
+type ClaimLogEntryForProcessingRow struct {
+	InstanceID int64  `json:"instance_id"`
+	Status     string `json:"status"`
+}
+
+func (q *Queries) ClaimLogEntryForProcessing(ctx context.Context, arg ClaimLogEntryForProcessingParams) (ClaimLogEntryForProcessingRow, error) {
+	row := q.queryRow(ctx, q.claimLogEntryForProcessingStmt, claimLogEntryForProcessing, arg.InstanceID, arg.Status)
+	var i ClaimLogEntryForProcessingRow
+	err := row.Scan(&i.InstanceID, &i.Status)
+	return i, err
+}
+
+const createLogEntry = `-- name: CreateLogEntry :one
+INSERT INTO ingestion_log (instance_id, source, status)
+VALUES ($1, $2, $3)
+ON CONFLICT (instance_id) DO UPDATE
+    SET
+        last_attempt_at = now(),
+        attempt_count = ingestion_log.attempt_count + 1
+RETURNING instance_id, source, status, first_seen_at, last_attempt_at, attempt_count, error
+`
+
+type CreateLogEntryParams struct {
+	InstanceID int64  `json:"instance_id"`
+	Source     string `json:"source"`
+	Status     string `json:"status"`
+}
+
+func (q *Queries) CreateLogEntry(ctx context.Context, arg CreateLogEntryParams) (IngestionLog, error) {
+	row := q.queryRow(ctx, q.createLogEntryStmt, createLogEntry, arg.InstanceID, arg.Source, arg.Status)
+	var i IngestionLog
+	err := row.Scan(
+		&i.InstanceID,
+		&i.Source,
+		&i.Status,
+		&i.FirstSeenAt,
+		&i.LastAttemptAt,
+		&i.AttemptCount,
+		&i.Error,
+	)
+	return i, err
+}
+
 const updateLogEntryStatus = `-- name: UpdateLogEntryStatus :exec
 UPDATE ingestion_log
 SET
@@ -28,35 +83,4 @@ type UpdateLogEntryStatusParams struct {
 func (q *Queries) UpdateLogEntryStatus(ctx context.Context, arg UpdateLogEntryStatusParams) error {
 	_, err := q.exec(ctx, q.updateLogEntryStatusStmt, updateLogEntryStatus, arg.InstanceID, arg.Status, arg.Error)
 	return err
-}
-
-const upsertLogEntry = `-- name: UpsertLogEntry :one
-INSERT INTO ingestion_log (instance_id, source, status)
-VALUES ($1, $2, $3)
-ON CONFLICT (instance_id) DO UPDATE
-    SET
-        last_attempt_at = now(),
-        attempt_count = ingestion_log.attempt_count + 1
-RETURNING instance_id, source, status, first_seen_at, last_attempt_at, attempt_count, error
-`
-
-type UpsertLogEntryParams struct {
-	InstanceID int64  `json:"instance_id"`
-	Source     string `json:"source"`
-	Status     string `json:"status"`
-}
-
-func (q *Queries) UpsertLogEntry(ctx context.Context, arg UpsertLogEntryParams) (IngestionLog, error) {
-	row := q.queryRow(ctx, q.upsertLogEntryStmt, upsertLogEntry, arg.InstanceID, arg.Source, arg.Status)
-	var i IngestionLog
-	err := row.Scan(
-		&i.InstanceID,
-		&i.Source,
-		&i.Status,
-		&i.FirstSeenAt,
-		&i.LastAttemptAt,
-		&i.AttemptCount,
-		&i.Error,
-	)
-	return i, err
 }

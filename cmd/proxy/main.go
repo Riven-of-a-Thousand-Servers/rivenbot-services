@@ -34,16 +34,16 @@ var (
 	rateInterval        = time.Second * time.Duration(rateIntervalSeconds)
 )
 
-type transport struct {
-	nW      atomic.Int64
-	nS      atomic.Int64
-	rt      []http.RoundTripper
-	statsRl []*rate.Limiter
-	wwwRl   []*rate.Limiter
+type ProxyTransport struct {
+	baseURLCount     atomic.Int64
+	statsURLCount    atomic.Int64
+	roundTripper     []http.RoundTripper
+	statsRateLimiter []*rate.Limiter
+	baseRateLimiter  []*rate.Limiter
 }
 
 var (
-	proxyTransport        = &transport{}
+	proxyTransport        = &ProxyTransport{}
 	statsDomain    string = "stats.bungie.net"
 	baseDomain     string = "www.bungie.net"
 	statsPath      string = "Destiny2/Stats/PostGameCarnageReport"
@@ -124,22 +124,23 @@ Outer:
 			fmt.Printf("ip -6 addr add %s/64 dev %s\n", addr.String(), ipv6interface)
 		}
 
-		proxyTransport.statsRl = append(proxyTransport.statsRl, rate.NewLimiter(rate.Every(time.Second/40), 90))
-		proxyTransport.wwwRl = append(proxyTransport.wwwRl, rate.NewLimiter(rate.Every(time.Second/40), 90))
-		proxyTransport.rt = append(proxyTransport.rt, rt)
+		proxyTransport.statsRateLimiter = append(proxyTransport.statsRateLimiter, rate.NewLimiter(rate.Every(time.Second/40), 90))
+		proxyTransport.baseRateLimiter = append(proxyTransport.baseRateLimiter, rate.NewLimiter(rate.Every(time.Second/40), 90))
+		proxyTransport.roundTripper = append(proxyTransport.roundTripper, rt)
 		addr = addr.Next()
 	}
 
 	rp := &httputil.ReverseProxy{
-		Director: func(r *http.Request) {
-			if strings.Contains(r.URL.Path, statsPath) {
-				r.URL.Host = statsDomain
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			out := pr.Out
+			if strings.Contains(pr.In.URL.Path, statsPath) {
+				out.URL.Host = statsDomain
 			} else {
-				r.URL.Host = baseDomain
+				out.URL.Host = baseDomain
 			}
-			r.URL.Scheme = "https"
-			r.Header.Set("User-Agent", "rivenbot")
-			r.Header.Del("x-forwarded-for")
+
+			out.URL.Scheme = "https"
+			out.Header.Set("User-Agent", "rivenbot")
 		},
 		Transport: proxyTransport,
 	}
@@ -163,25 +164,25 @@ Outer:
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", *port), mux))
 }
 
-func (t *transport) RoundTrip(r *http.Request) (*http.Response, error) {
+func (t *ProxyTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	var rl *rate.Limiter
 	var n int64
 
 	if strings.Contains(r.URL.Path, statsPath) {
-		n = t.nS.Add(1)
+		n = t.statsURLCount.Add(1)
 		r.Host = statsDomain
-		rl = t.statsRl[n%int64(len(t.statsRl))]
+		rl = t.statsRateLimiter[n%int64(len(t.statsRateLimiter))]
 	} else {
-		n = t.nW.Add(1)
+		n = t.baseURLCount.Add(1)
 		r.Host = baseDomain
-		rl = t.wwwRl[n%int64(len(t.wwwRl))]
+		rl = t.baseRateLimiter[n%int64(len(t.baseRateLimiter))]
 	}
 
 	if *verbose {
 		log.Printf("Sending request: %s\n", r.URL.String())
 		log.Printf("Request headers: %s\n", r.Header)
 	}
-	rt := t.rt[n%int64(len(t.rt))]
+	rt := t.roundTripper[n%int64(len(t.roundTripper))]
 	rl.Wait(r.Context())
 	return rt.RoundTrip(r)
 }

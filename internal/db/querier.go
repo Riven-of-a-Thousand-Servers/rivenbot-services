@@ -9,16 +9,17 @@ import (
 )
 
 type Querier interface {
+	ClaimLogEntryForProcessing(ctx context.Context, arg ClaimLogEntryForProcessingParams) (ClaimLogEntryForProcessingRow, error)
 	CreateDestinyPlayer(ctx context.Context, arg CreateDestinyPlayerParams) (DestinyPlayer, error)
 	CreateInstance(ctx context.Context, arg CreateInstanceParams) error
 	CreateInstanceCharacter(ctx context.Context, arg CreateInstanceCharacterParams) error
 	CreateInstanceCharacterWeapon(ctx context.Context, arg CreateInstanceCharacterWeaponParams) error
 	CreateInstancePlayer(ctx context.Context, arg CreateInstancePlayerParams) error
+	CreateLogEntry(ctx context.Context, arg CreateLogEntryParams) (IngestionLog, error)
 	CreatePgcr(ctx context.Context, arg CreatePgcrParams) error
 	CreateWeapon(ctx context.Context, arg CreateWeaponParams) error
 	IncrementPlayerCounts(ctx context.Context, arg IncrementPlayerCountsParams) error
 	UpdateLogEntryStatus(ctx context.Context, arg UpdateLogEntryStatusParams) error
-	UpsertLogEntry(ctx context.Context, arg UpsertLogEntryParams) (IngestionLog, error)
 }
 
 var _ Querier = (*Queries)(nil)

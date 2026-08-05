@@ -5,6 +5,7 @@ type ProcessorConfig struct {
 	RabbitMQUrl   string
 	RabbitMQQueue string
 	DatasourceUrl string
+	ApiKey        string
 	Goroutines    int
 	Noop          bool
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"pgcr-processing-service/internal/cache"
@@ -42,12 +43,14 @@ var reverseSources map[string]Source = map[string]Source{
 type Status int
 
 const (
-	processing Status = iota + 1
+	started Status = iota + 1
+	processing
 	errored
 	success
 )
 
 var statuses map[Status]string = map[Status]string{
+	started:    "started",
 	processing: "processing",
 	errored:    "error",
 	success:    "success",
@@ -113,6 +116,7 @@ func (p *PgcrProcessor) handleDelivery(ctx context.Context, delivery consumer.De
 	if err != nil {
 		slog.Error("Error unmarshalling body from message", "Error", err)
 		delivery.Nack(false)
+		return
 	}
 
 	instanceId := pgcr.Response.ActivityDetails.InstanceId
@@ -143,6 +147,7 @@ func (p *PgcrProcessor) handleDelivery(ctx context.Context, delivery consumer.De
 	compressed, err := compress.Gzip(&pgcr)
 	if err != nil {
 		slog.Error("Unable to compress pgcr", "instanceId", instanceId, "error", err)
+		delivery.Nack(false)
 		return
 	}
 
@@ -164,7 +169,7 @@ func (p *PgcrProcessor) handleDelivery(ctx context.Context, delivery consumer.De
 	qtx := p.queries.WithTx(tx)
 	err = p.Save(ctx, qtx, processed, source, compressed)
 	if err != nil {
-		if markErr := p.LedgerMarkError(ctx, instanceId64, err); markErr != nil {
+		if markErr := p.LedgerMarkError(ctx, qtx, instanceId64, err); markErr != nil {
 			slog.Error("Failed to mark ledger entry as failed", "instanceId", instanceId, "error", err)
 		}
 		slog.Error("Error processing pgcr into db", "instanceId", instanceId, "error", err)
@@ -173,7 +178,7 @@ func (p *PgcrProcessor) handleDelivery(ctx context.Context, delivery consumer.De
 	}
 
 	if err := tx.Commit(); err != nil {
-		if markErr := p.LedgerMarkError(ctx, instanceId64, err); markErr != nil {
+		if markErr := p.LedgerMarkError(ctx, p.queries, instanceId64, err); markErr != nil {
 			slog.Error("Failed to mark ledger entry as failed", "instanceId", instanceId, "error", err)
 		}
 		slog.Error("Failed to commit transaction", "instanceId", instanceId, "error", err)
@@ -182,23 +187,23 @@ func (p *PgcrProcessor) handleDelivery(ctx context.Context, delivery consumer.De
 	}
 
 	slog.Info("Finished processing pgcr", "InstanceId", instanceId)
-	if err := p.LedgerMarkSuccess(ctx, instanceId64); err != nil {
-		slog.Error("Failed to mark ledger entry as processed", "instanceId", instanceId)
+	if err := p.LedgerMarkSuccess(ctx, p.queries, instanceId64); err != nil {
+		slog.Error("Failed to mark ledger entry as processed", "instanceId", instanceId, "error", err)
 	}
 
 	delivery.Ack()
 }
 
-func (p *PgcrProcessor) LedgerMarkSuccess(ctx context.Context, instanceId int64) error {
-	return p.queries.UpdateLogEntryStatus(ctx, db.UpdateLogEntryStatusParams{
+func (p *PgcrProcessor) LedgerMarkSuccess(ctx context.Context, qtx *db.Queries, instanceId int64) error {
+	return qtx.UpdateLogEntryStatus(ctx, db.UpdateLogEntryStatusParams{
 		InstanceID: instanceId,
 		Status:     statuses[success],
 		Error:      sql.NullString{Valid: false},
 	})
 }
 
-func (p *PgcrProcessor) LedgerMarkError(ctx context.Context, instanceId int64, cause error) error {
-	return p.queries.UpdateLogEntryStatus(ctx, db.UpdateLogEntryStatusParams{
+func (p *PgcrProcessor) LedgerMarkError(ctx context.Context, qtx *db.Queries, instanceId int64, cause error) error {
+	return qtx.UpdateLogEntryStatus(ctx, db.UpdateLogEntryStatusParams{
 		InstanceID: instanceId,
 		Status:     statuses[errored],
 		Error:      sql.NullString{String: cause.Error(), Valid: cause.Error() != ""},
@@ -208,10 +213,10 @@ func (p *PgcrProcessor) LedgerMarkError(ctx context.Context, instanceId int64, c
 // Saves a processed pgcr to the Postgres DB
 func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcr.PgcrInfo, source Source, b []byte) error {
 	// If inserting to the ledger fails, skip inserting to the DB
-	entry, err := p.queries.UpsertLogEntry(ctx, db.UpsertLogEntryParams{
+	entry, err := qtx.CreateLogEntry(ctx, db.CreateLogEntryParams{
 		InstanceID: pgcr.InstanceId,
 		Source:     sources[source],
-		Status:     statuses[processing],
+		Status:     statuses[started],
 	})
 	if err != nil {
 		slog.Error("Failed to insert to ingestion log", "instanceId", pgcr.InstanceId, "error", err)
@@ -231,9 +236,26 @@ func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcr.Pg
 			slog.Info("Instance actively being processed elsewhere, skipping", "instanceId", pgcr.InstanceId)
 			return nil
 		}
+	case statuses[started]:
 	}
 
-	if err := p.queries.CreateInstance(ctx, db.CreateInstanceParams{
+	claimed, err := qtx.ClaimLogEntryForProcessing(ctx, db.ClaimLogEntryForProcessingParams{
+		InstanceID: pgcr.InstanceId,
+		Status:     entry.Status,
+	})
+
+	if errors.Is(err, sql.ErrNoRows) {
+		slog.Info("Lost the claim race, skipping", "instanceId", pgcr.InstanceId)
+		return nil
+	}
+
+	if err != nil {
+		slog.Error("Failed to claim ingestion entry", "instanceId", pgcr.InstanceId)
+		return err
+	}
+	_ = claimed
+
+	if err := qtx.CreateInstance(ctx, db.CreateInstanceParams{
 		ID:              pgcr.InstanceId,
 		ActivityHash:    pgcr.ActivityHash,
 		IsFresh:         pgcr.FromBeginning,
@@ -247,7 +269,7 @@ func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcr.Pg
 		return err
 	}
 
-	if err := p.queries.CreatePgcr(ctx, db.CreatePgcrParams{
+	if err := qtx.CreatePgcr(ctx, db.CreatePgcrParams{
 		InstanceID: pgcr.InstanceId,
 		Blob:       b,
 	}); err != nil {
@@ -277,14 +299,14 @@ func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcr.Pg
 			}
 		}
 
-		_, err := p.queries.CreateDestinyPlayer(ctx, player)
+		_, err := qtx.CreateDestinyPlayer(ctx, player)
 		if err != nil {
 			slog.Error("Failed to save destiny player", "instanceId", pgcr.InstanceId, "membershipId", player.MembershipID, "membershipType", player.MembershipType)
 			return err
 		}
 
 		// InstancePlayer
-		err = p.queries.CreateInstancePlayer(ctx, db.CreateInstancePlayerParams{
+		err = qtx.CreateInstancePlayer(ctx, db.CreateInstancePlayerParams{
 			InstanceID:        pgcr.InstanceId,
 			MembershipID:      pi.MembershipId,
 			Completed:         sql.NullBool{Bool: pi.Completed},
@@ -294,7 +316,7 @@ func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcr.Pg
 		switch {
 		case err == nil:
 			isFullClear := pgcr.FromBeginning && pi.Completed
-			if err := p.queries.IncrementPlayerCounts(ctx, db.IncrementPlayerCountsParams{
+			if err := qtx.IncrementPlayerCounts(ctx, db.IncrementPlayerCountsParams{
 				MembershipID: pi.MembershipId,
 				Column2:      pi.Completed,
 				Column3:      isFullClear,
@@ -312,7 +334,7 @@ func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcr.Pg
 
 		// InstanceCharacter
 		for _, ci := range pi.CharacterInfo {
-			if err := p.queries.CreateInstanceCharacter(ctx, db.CreateInstanceCharacterParams{
+			if err := qtx.CreateInstanceCharacter(ctx, db.CreateInstanceCharacterParams{
 				InstanceID:   pgcr.InstanceId,
 				MembershipID: pi.MembershipId,
 				CharacterID:  ci.CharacterId,
@@ -341,7 +363,7 @@ func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcr.Pg
 					continue
 				}
 
-				if err := p.queries.CreateWeapon(ctx, db.CreateWeaponParams{
+				if err := qtx.CreateWeapon(ctx, db.CreateWeaponParams{
 					WeaponHash:    ciw.WeaponHash,
 					IconUrl:       manifestEntity.Response.DisplayProperties.Icon,
 					WeaponName:    manifestEntity.Response.DisplayProperties.Name,
@@ -353,7 +375,7 @@ func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcr.Pg
 				}
 
 				// InstanceCharacterWeapons
-				if err := p.queries.CreateInstanceCharacterWeapon(ctx, db.CreateInstanceCharacterWeaponParams{
+				if err := qtx.CreateInstanceCharacterWeapon(ctx, db.CreateInstanceCharacterWeaponParams{
 					InstanceID:         pgcr.InstanceId,
 					PlayerMembershipID: pi.MembershipId,
 					PlayerCharacterID:  ci.CharacterId,
@@ -383,7 +405,7 @@ func extractSource(headers amqp091.Table) (Source, error) {
 		return 0, fmt.Errorf("source header is not a string, got %T", raw)
 	}
 
-	src, ok := reverseSources[str]
+	src, ok := reverseSources[strings.ToLower(str)]
 	if !ok {
 		return 0, fmt.Errorf("unrecognized source value: %q", str)
 	}

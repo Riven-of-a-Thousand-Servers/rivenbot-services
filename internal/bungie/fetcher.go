@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 
 	"pgcr-processing-service/internal/cache"
@@ -32,6 +33,11 @@ func BungieManifestFetcher[T any](client *http.Client, apiKey string) cache.Fetc
 			return zero, err
 		}
 		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusOK {
+			slog.Error("Received an error from the manifest API", "error", err)
+			return zero, err
+		}
 
 		data, err := io.ReadAll(res.Body)
 		if err != nil {

@@ -82,7 +82,8 @@ func newProcessCommand() *cobra.Command {
 				})
 				defer redis.Close()
 
-				cacheService := cache.NewService(redis, 12*time.Hour, bungie.BungieManifestFetcher[manifest.Response](http.DefaultClient, ""))
+				fetcher := bungie.BungieManifestFetcher[manifest.Response](http.DefaultClient, config.ApiKey)
+				cacheService := cache.NewService(redis, 12*time.Hour, fetcher)
 				mapper := mapper.New(cacheService)
 
 				processor = process.NewProcessor(conn, queries, rabbitmq, mapper, cacheService, config.Goroutines)
@@ -97,6 +98,7 @@ func newProcessCommand() *cobra.Command {
 	flags.IntVar(&config.Goroutines, "goroutines", 1, "Number of goroutines to spin up")
 	flags.StringVar(&config.RabbitMQUrl, "rabbitmq-url", "", "URL to reach RabbitMQ")
 	flags.StringVar(&config.RabbitMQQueue, "rabbitmq-queue", "rivenbot", "RabbitMQ queue name")
+	flags.StringVar(&config.ApiKey, "api-key", "", "Bungie API key for manifest requests")
 	flags.BoolVar(&config.Noop, "noop", false, "Whether this processor will do something when consuming")
 
 	return rootCmd

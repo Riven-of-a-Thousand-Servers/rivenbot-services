@@ -113,7 +113,6 @@ func GetRaidAndDifficulty(label string) (pgcr.RaidName, pgcr.RaidDifficulty, err
 
 	difficulty := strings.TrimSpace(tokens[1]) // Default difficulty
 	raidDifficulty, difficultyExists := reverseDifficultyLabels[difficulty]
-	log.Printf("Difficulty exists for raid [%s]: %v", label, difficultyExists)
 	if !difficultyExists {
 		switch {
 		case strings.EqualFold(difficulty, "Standard"):
