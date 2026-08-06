@@ -169,7 +169,7 @@ func (p *PgcrProcessor) handleDelivery(ctx context.Context, delivery consumer.De
 	qtx := p.queries.WithTx(tx)
 	err = p.Save(ctx, qtx, processed, source, compressed)
 	if err != nil {
-		if markErr := p.LedgerMarkError(ctx, qtx, instanceId64, err); markErr != nil {
+		if markErr := p.LedgerMarkError(ctx, p.queries, instanceId64, err); markErr != nil {
 			slog.Error("Failed to mark ledger entry as failed", "instanceId", instanceId, "error", err)
 		}
 		slog.Error("Error processing pgcr into db", "instanceId", instanceId, "error", err)
@@ -194,16 +194,16 @@ func (p *PgcrProcessor) handleDelivery(ctx context.Context, delivery consumer.De
 	delivery.Ack()
 }
 
-func (p *PgcrProcessor) LedgerMarkSuccess(ctx context.Context, qtx *db.Queries, instanceId int64) error {
-	return qtx.UpdateLogEntryStatus(ctx, db.UpdateLogEntryStatusParams{
+func (p *PgcrProcessor) LedgerMarkSuccess(ctx context.Context, queries *db.Queries, instanceId int64) error {
+	return queries.UpdateLogEntryStatus(ctx, db.UpdateLogEntryStatusParams{
 		InstanceID: instanceId,
 		Status:     statuses[success],
 		Error:      sql.NullString{Valid: false},
 	})
 }
 
-func (p *PgcrProcessor) LedgerMarkError(ctx context.Context, qtx *db.Queries, instanceId int64, cause error) error {
-	return qtx.UpdateLogEntryStatus(ctx, db.UpdateLogEntryStatusParams{
+func (p *PgcrProcessor) LedgerMarkError(ctx context.Context, queries *db.Queries, instanceId int64, cause error) error {
+	return queries.UpdateLogEntryStatus(ctx, db.UpdateLogEntryStatusParams{
 		InstanceID: instanceId,
 		Status:     statuses[errored],
 		Error:      sql.NullString{String: cause.Error(), Valid: cause.Error() != ""},
@@ -213,7 +213,7 @@ func (p *PgcrProcessor) LedgerMarkError(ctx context.Context, qtx *db.Queries, in
 // Saves a processed pgcr to the Postgres DB
 func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcr.PgcrInfo, source Source, b []byte) error {
 	// If inserting to the ledger fails, skip inserting to the DB
-	entry, err := qtx.CreateLogEntry(ctx, db.CreateLogEntryParams{
+	entry, err := p.queries.CreateLogEntry(ctx, db.CreateLogEntryParams{
 		InstanceID: pgcr.InstanceId,
 		Source:     sources[source],
 		Status:     statuses[started],
@@ -239,7 +239,7 @@ func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcr.Pg
 	case statuses[started]:
 	}
 
-	claimed, err := qtx.ClaimLogEntryForProcessing(ctx, db.ClaimLogEntryForProcessingParams{
+	claimed, err := p.queries.ClaimLogEntryForProcessing(ctx, db.ClaimLogEntryForProcessingParams{
 		InstanceID: pgcr.InstanceId,
 		Status:     entry.Status,
 	})
