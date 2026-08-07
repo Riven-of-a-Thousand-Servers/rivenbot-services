@@ -26,18 +26,18 @@ import (
 type Source int
 
 const (
-	crawler Source = iota + 1
-	dataset
+	Crawler Source = iota + 1
+	Dataset
 )
 
 var sources map[Source]string = map[Source]string{
-	crawler: "crawler",
-	dataset: "dataset",
+	Crawler: "crawler",
+	Dataset: "dataset",
 }
 
 var reverseSources map[string]Source = map[string]Source{
-	"crawler": crawler,
-	"dataset": dataset,
+	"crawler": Crawler,
+	"dataset": Dataset,
 }
 
 type Status int
@@ -56,7 +56,13 @@ var statuses map[Status]string = map[Status]string{
 	success:    "success",
 }
 
+// This is the duration after which an entry in the Ledger is
+// marked as stale
 const staleThreshold = 5 * time.Minute
+
+type Processor[T any] interface {
+	Process(context.Context, consumer.Delivery[T])
+}
 
 type PgcrProcessor struct {
 	db          *sql.DB
@@ -67,7 +73,8 @@ type PgcrProcessor struct {
 	cache       cache.Service[manifest.Response]
 }
 
-func NewProcessor(db *sql.DB,
+// Full Processor with RabbitMQ as an extra dependency
+func NewDefaultProcessor(db *sql.DB,
 	queries *db.Queries,
 	consumer consumer.Consumer[json.RawMessage],
 	mapper *mapper.PgcrMapper,
@@ -88,8 +95,23 @@ func NoOpProcessor(c consumer.Consumer[json.RawMessage], goroutines int) *PgcrPr
 	return &PgcrProcessor{consumer: c, Concurrency: goroutines}
 }
 
-// StartWork handles messages received from RabbitMQ to process PGCRs into the postgres db
-func (p *PgcrProcessor) StartWork(ctx context.Context, id int, noop bool) error {
+// This dataset processor doesnt require a RabbitMQ broker
+// since it'll be calling processPgcr() directly
+func NewDatasetProcessor(db *sql.DB,
+	queries *db.Queries,
+	mapper *mapper.PgcrMapper,
+	cache cache.Service[manifest.Response],
+) *PgcrProcessor {
+	return &PgcrProcessor{
+		db:      db,
+		queries: queries,
+		mapper:  mapper,
+		cache:   cache,
+	}
+}
+
+// BeginProcessing handles messages received from RabbitMQ to process PGCRs into the postgres db
+func (p *PgcrProcessor) BeginProcessing(ctx context.Context, id int, noop bool) error {
 	deliveries, err := p.consumer.Consume(ctx)
 	if err != nil {
 		return err
@@ -105,49 +127,15 @@ func (p *PgcrProcessor) StartWork(ctx context.Context, id int, noop bool) error 
 				slog.Info("Delivery channel closed by the broker", "Id", id)
 				return nil
 			}
-			p.handleDelivery(ctx, delivery, noop)
+			p.Process(ctx, delivery, noop)
 		}
 	}
 }
 
-func (p *PgcrProcessor) handleDelivery(ctx context.Context, delivery consumer.Delivery[json.RawMessage], noop bool) {
-	var pgcr pgcr.PostGameCarnageReportResponse
-	err := json.Unmarshal(delivery.Item, &pgcr)
-	if err != nil {
-		slog.Error("Error unmarshalling body from message", "Error", err)
-		delivery.Nack(false)
-		return
-	}
-
-	instanceId := pgcr.Response.ActivityDetails.InstanceId
-	instanceId64, _ := strconv.ParseInt(instanceId, 10, 64)
-	mode := pgcr.Response.ActivityDetails.Mode
-
+func (p *PgcrProcessor) Process(ctx context.Context, delivery consumer.Delivery[json.RawMessage], noop bool) {
 	if noop {
-		slog.Info("Processed Pgcr!", "instaceId", instanceId)
+		slog.Info("Processed Pgcr! (Noop)")
 		delivery.Ack()
-		return
-	}
-
-	// Only process raid activity
-	if pgcr.Response.ActivityDetails.Mode != 4 {
-		slog.Info("Pgcr is not a raid", "pgcr", instanceId, "mode", mode)
-		delivery.Ack()
-		return
-	}
-
-	slog.Info("Processing pgcr", "InstanceId", instanceId)
-	processed, err := p.mapper.ExtractInfo(&pgcr.Response)
-	if err != nil {
-		slog.Error("Error mapping pgcr to a processed pgcr", "instanceId", instanceId, "error", err)
-		delivery.Nack(false)
-		return
-	}
-
-	compressed, err := compress.Gzip(&pgcr)
-	if err != nil {
-		slog.Error("Unable to compress pgcr", "instanceId", instanceId, "error", err)
-		delivery.Nack(false)
 		return
 	}
 
@@ -158,11 +146,51 @@ func (p *PgcrProcessor) handleDelivery(ctx context.Context, delivery consumer.De
 		return
 	}
 
+	if err := p.ProcessPgcr(ctx, delivery.Item, source); err != nil {
+		slog.Error("Error processing pgcr", "error", err)
+		delivery.Nack(false)
+		return
+	}
+
+	delivery.Ack()
+}
+
+// This method takes in raw bytes and has no acknowledgement of RabbitMQ
+// Its the core processing logic that will be saved to the DB
+func (p *PgcrProcessor) ProcessPgcr(ctx context.Context, raw []byte, source Source) error {
+	var pgcr pgcr.PostGameCarnageReportResponse
+	err := json.Unmarshal(raw, &pgcr)
+	if err != nil {
+		slog.Error("Error unmarshalling body from message", "Error", err)
+		return err
+	}
+
+	instanceId := pgcr.Response.ActivityDetails.InstanceId
+	instanceId64, _ := strconv.ParseInt(instanceId, 10, 64)
+	mode := pgcr.Response.ActivityDetails.Mode
+
+	// Only process raid activity
+	if pgcr.Response.ActivityDetails.Mode != 4 {
+		slog.Info("Pgcr is not a raid", "pgcr", instanceId, "mode", mode)
+		return nil
+	}
+
+	slog.Info("Processing pgcr", "instanceId", instanceId)
+	processed, err := p.mapper.ExtractInfo(&pgcr.Response)
+	if err != nil {
+		return err
+	}
+
+	compressed, err := compress.Gzip(&pgcr)
+	if err != nil {
+		slog.Error("Unable to compress pgcr", "instanceId", instanceId, "error", err)
+		return err
+	}
+
 	tx, err := p.db.BeginTx(ctx, nil)
 	if err != nil {
 		slog.Error("Failed to begin transaction", "error", err)
-		delivery.Nack(false)
-		return
+		return err
 	}
 	defer tx.Rollback()
 
@@ -171,27 +199,28 @@ func (p *PgcrProcessor) handleDelivery(ctx context.Context, delivery consumer.De
 	if err != nil {
 		if markErr := p.LedgerMarkError(ctx, p.queries, instanceId64, err); markErr != nil {
 			slog.Error("Failed to mark ledger entry as failed", "instanceId", instanceId, "error", err)
+			return markErr
 		}
 		slog.Error("Error processing pgcr into db", "instanceId", instanceId, "error", err)
-		delivery.Nack(false)
-		return
+		return err
 	}
 
 	if err := tx.Commit(); err != nil {
 		if markErr := p.LedgerMarkError(ctx, p.queries, instanceId64, err); markErr != nil {
 			slog.Error("Failed to mark ledger entry as failed", "instanceId", instanceId, "error", err)
+			return markErr
 		}
 		slog.Error("Failed to commit transaction", "instanceId", instanceId, "error", err)
-		delivery.Nack(false)
-		return
+		return err
 	}
 
 	slog.Info("Finished processing pgcr", "InstanceId", instanceId)
 	if err := p.LedgerMarkSuccess(ctx, p.queries, instanceId64); err != nil {
 		slog.Error("Failed to mark ledger entry as processed", "instanceId", instanceId, "error", err)
+		return err
 	}
 
-	delivery.Ack()
+	return nil
 }
 
 func (p *PgcrProcessor) LedgerMarkSuccess(ctx context.Context, queries *db.Queries, instanceId int64) error {

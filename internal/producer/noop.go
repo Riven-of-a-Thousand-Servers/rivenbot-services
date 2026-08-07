@@ -1,18 +1,14 @@
-package stdout
+package producer
 
-import (
-	"context"
+import "context"
 
-	"pgcr-processing-service/internal/producer"
-)
+type NoopFactory[T any] struct{}
 
-type Factory[T any] struct{}
-
-func NewFactory[T any]() *Factory[T] {
-	return &Factory[T]{}
+func NewNoopFactory[T any]() *NoopFactory[T] {
+	return &NoopFactory[T]{}
 }
 
-func (f *Factory[T]) NewProducer(ctx context.Context) (producer.ProducerCloser[T], error) {
+func (f *NoopFactory[T]) NewProducer(ctx context.Context) (ProducerCloser[T], error) {
 	return &stdoutProducer[T]{}, nil
 }
 

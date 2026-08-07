@@ -14,10 +14,9 @@ import (
 	"syscall"
 	"time"
 
-	"pgcr-processing-service/internal/crawling"
+	"pgcr-processing-service/internal/crawler"
 	"pgcr-processing-service/internal/producer"
 	"pgcr-processing-service/internal/rabbitmq"
-	"pgcr-processing-service/internal/stdout"
 	"pgcr-processing-service/internal/transport"
 	"pgcr-processing-service/internal/types/net"
 
@@ -79,7 +78,7 @@ func runCrawler(ctx context.Context, config crawlerConfig) error {
 	var factory producer.Factory[json.RawMessage]
 	switch {
 	case config.Noop:
-		noOpFactory := stdout.NewFactory[json.RawMessage]()
+		noOpFactory := producer.NewNoopFactory[json.RawMessage]()
 		factory = noOpFactory
 	default:
 		if config.RabbitMQQueue == "" {
@@ -130,13 +129,13 @@ func runCrawler(ctx context.Context, config crawlerConfig) error {
 		}
 	}(ctx, tick, config.Offset, in)
 
-	opts := []crawling.PgcrCrawlerOpt{
-		crawling.WithMaxSize(net.MaxRequestSizeKB),
-		crawling.WithBaseUrl(config.BaseUrl),
-		crawling.WithOffset(config.Offset),
+	opts := []crawler.PgcrCrawlerOpt{
+		crawler.WithMaxSize(net.MaxRequestSizeKB),
+		crawler.WithBaseUrl(config.BaseUrl),
+		crawler.WithOffset(config.Offset),
 	}
 
-	crawler := crawling.NewPgcrCrawler(factory, &client, in, opts...)
+	crawler := crawler.NewPgcrCrawler(factory, &client, in, opts...)
 	for id := range config.Goroutines {
 		wg.Go(func() {
 			slog.Info("Spawning worker", "id", id)

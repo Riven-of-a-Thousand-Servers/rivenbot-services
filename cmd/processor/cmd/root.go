@@ -86,7 +86,7 @@ func newProcessCommand() *cobra.Command {
 				cacheService := cache.NewService(redis, 12*time.Hour, fetcher)
 				mapper := mapper.New(cacheService)
 
-				processor = process.NewProcessor(conn, queries, rabbitmq, mapper, cacheService, config.Goroutines)
+				processor = process.NewDefaultProcessor(conn, queries, rabbitmq, mapper, cacheService, config.Goroutines)
 			}
 			return runProcessor(cmd.Context(), processor, config.Noop)
 		},
@@ -112,7 +112,7 @@ func runProcessor(ctx context.Context, processor *process.PgcrProcessor, noop bo
 	for i := range processor.Concurrency {
 		wg.Go(func() {
 			slog.Info("Starting worker", "Id", i)
-			err := processor.StartWork(ctx, i, noop)
+			err := processor.BeginProcessing(ctx, i, noop)
 			if err != nil {
 				slog.Error("Something bad happened", "error", err)
 			}
