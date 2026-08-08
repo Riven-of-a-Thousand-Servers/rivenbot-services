@@ -12,16 +12,16 @@ import (
 const maxSize = 1024 * 1024 * 20 // 20 MBs
 
 type Ingester struct {
-	FileIndex FileIndex
+	FileIndex *FileIndex
 	Pipeline  chan<- DatasetEntry
 }
 
-func NewIngester(idx FileIndex, pipeline chan<- DatasetEntry) *Ingester {
+func NewIngester(idx *FileIndex, pipeline chan<- DatasetEntry) *Ingester {
 	return &Ingester{FileIndex: idx, Pipeline: pipeline}
 }
 
 func (i *Ingester) Start(ctx context.Context) error {
-	for filename, entry := range i.FileIndex {
+	for filename, entry := range *i.FileIndex {
 		file, err := os.Open(entry.Path)
 		if err != nil {
 			slog.Error("Error while opening file", "file", file, "error", err)
