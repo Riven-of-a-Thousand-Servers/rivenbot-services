@@ -23,7 +23,7 @@ type FileEntry struct {
 	Progress chan int64
 }
 
-func NewFileIndex(root string) *FileDiscoverer {
+func NewDiscoverer(root string) *FileDiscoverer {
 	return &FileDiscoverer{Root: root}
 }
 

@@ -8,10 +8,10 @@ import (
 )
 
 type Worker struct {
-	Processor process.PgcrProcessor
+	Processor *process.PgcrProcessor
 }
 
-func NewWorker(processor process.PgcrProcessor) *Worker {
+func NewWorker(processor *process.PgcrProcessor) *Worker {
 	return &Worker{
 		Processor: processor,
 	}
@@ -22,7 +22,7 @@ func (w *Worker) Start(ctx context.Context, pipeline <-chan DatasetEntry) error 
 		select {
 		case <-ctx.Done():
 			slog.Error("Context cancelled. Returning")
-			return nil
+			return ctx.Err()
 		case item, ok := <-pipeline:
 			if !ok {
 				slog.Warn("Channel closed while processing", "item", item.Number, "filename", item.Filename)
