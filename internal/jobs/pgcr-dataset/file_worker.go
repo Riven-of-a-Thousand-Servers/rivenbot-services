@@ -7,6 +7,8 @@ import (
 	"pgcr-processing-service/internal/process"
 )
 
+// The Worker relies on the dependencies of the
+// Processor to insert PGCRs into the db
 type Worker struct {
 	Processor *process.PgcrProcessor
 }
@@ -32,7 +34,7 @@ func (w *Worker) Start(ctx context.Context, pipeline <-chan DatasetEntry) error 
 			err := w.Processor.ProcessPgcr(ctx, item.Bytes, process.Dataset)
 			if err != nil {
 				slog.Error("Failed to process pgcr", "item", item.Number, "filename", item.Filename, "error", err)
-				return err
+				continue
 			}
 		}
 	}

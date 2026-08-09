@@ -1,6 +1,7 @@
 package pgcrdataset
 
 import (
+	"context"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -17,7 +18,7 @@ type FileDiscoverer struct {
 }
 
 type FileEntry struct {
-	Path     string
+	Name     string
 	Started  bool
 	Done     bool
 	Progress chan int64
@@ -27,25 +28,27 @@ func NewDiscoverer(root string) *FileDiscoverer {
 	return &FileDiscoverer{Root: root}
 }
 
-func (f *FileDiscoverer) Discover(ext string) error {
+func (f *FileDiscoverer) Discover(ctx context.Context, extension string) error {
 	entries := make(map[string]*FileEntry)
 	walkFunc := func(path string, d fs.DirEntry, err error) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
 		if err != nil {
-			{
-				if os.IsPermission(err) {
-					return filepath.SkipDir
-				}
-				return err
+			if os.IsPermission(err) {
+				return filepath.SkipDir
 			}
+			return err
 		}
 
 		if d.IsDir() && strings.HasPrefix(d.Name(), ".") {
 			return filepath.SkipDir
 		}
 
-		if filepath.Ext(d.Name()) == ext {
-			entries[d.Name()] = &FileEntry{
-				Path:    path,
+		if filepath.Ext(d.Name()) == extension {
+			entries[path] = &FileEntry{
+				Name:    d.Name(),
 				Started: false,
 				Done:    false,
 			}

@@ -7,16 +7,21 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"pgcr-processing-service/internal/bungie"
 	"pgcr-processing-service/internal/cache"
 	"pgcr-processing-service/internal/db"
 	pgcrdataset "pgcr-processing-service/internal/jobs/pgcr-dataset"
+	"pgcr-processing-service/internal/jobs/pgcr-dataset/ui"
 	"pgcr-processing-service/internal/mapper"
 	"pgcr-processing-service/internal/process"
+	"pgcr-processing-service/internal/pubsub"
 	"pgcr-processing-service/internal/types/manifest"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/redis/go-redis/v9"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
@@ -40,15 +45,28 @@ dataset`,
 		// Uncomment the following line if your bare application
 		// has an action associated with it:
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := cmd.Context()
-			discoverer := pgcrdataset.NewDiscoverer(opts.RootDir)
-			if err := discoverer.Discover(".zst"); err != nil {
+			ctx, cancel := signal.NotifyContext(cmd.Context(), syscall.SIGTERM, syscall.SIGINT)
+			defer cancel()
+
+			// open a custom json-log file
+			logFile, err := os.OpenFile("dataset-import.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+			if err != nil {
 				return err
 			}
+			defer logFile.Close()
+
+			slog.SetDefault(slog.New(slog.NewJSONHandler(logFile, nil)))
+
+			g, ctx := errgroup.WithContext(ctx)
+
+			discoverer := pgcrdataset.NewDiscoverer(opts.RootDir)
+			g.Go(func() error {
+				return discoverer.Discover(ctx, ".zst")
+			})
+
 			input := make(chan pgcrdataset.DatasetEntry, 1500)
 			ingester := pgcrdataset.NewIngester(&discoverer.Files, input)
 
-			g := new(errgroup.Group)
 			g.Go(func() error {
 				return ingester.Start(cmd.Context())
 			})
@@ -84,8 +102,21 @@ dataset`,
 				})
 			}
 
+			broker := pubsub.NewBroker[pgcrdataset.Event](256)
+			defer broker.Shutdown()
+
+			events, unsub := broker.Subscribe()
+			defer unsub()
+
+			g.Go(func() error {
+				if _, err := tea.NewProgram(ui.NewModel(events, len(discoverer.Files))).Run(); err != nil {
+					return err
+				}
+				return nil
+			})
+
 			if err := g.Wait(); err == nil {
-				slog.Info("Successfully processed all dataset!", "num of files", len(discoverer.Files))
+				slog.Info("Successfully processed all the dataset!", "num of files", len(discoverer.Files))
 				return nil
 			} else {
 				slog.Info("Error during execution of dataset", "error", err)

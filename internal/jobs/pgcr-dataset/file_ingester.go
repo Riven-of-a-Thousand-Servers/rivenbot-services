@@ -21,8 +21,8 @@ func NewIngester(idx *FileIndex, pipeline chan<- DatasetEntry) *Ingester {
 }
 
 func (i *Ingester) Start(ctx context.Context) error {
-	for filename, entry := range *i.FileIndex {
-		file, err := os.Open(entry.Path)
+	for filepath, entry := range *i.FileIndex {
+		file, err := os.Open(filepath)
 		if err != nil {
 			slog.Error("Error while opening file", "file", file, "error", err)
 			return err
@@ -47,13 +47,15 @@ func (i *Ingester) Start(ctx context.Context) error {
 			default:
 				i.Pipeline <- DatasetEntry{
 					Bytes:    scanner.Bytes(),
-					Filename: filename,
+					Filename: entry.Name,
 					Number:   int64(count + 1),
 				}
 
 				entry.Progress <- int64(1)
 				count++
 			}
+
+			close(entry.Progress)
 		}
 
 		if err := scanner.Err(); err != nil {
