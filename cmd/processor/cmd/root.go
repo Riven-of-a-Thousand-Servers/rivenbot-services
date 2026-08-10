@@ -21,6 +21,7 @@ import (
 	"pgcr-processing-service/internal/mapper"
 	"pgcr-processing-service/internal/process"
 	"pgcr-processing-service/internal/rabbitmq"
+	"pgcr-processing-service/internal/runner"
 	"pgcr-processing-service/internal/types/manifest"
 	"pgcr-processing-service/internal/utils"
 
@@ -28,9 +29,19 @@ import (
 	"github.com/spf13/cobra"
 )
 
+type processorOpts struct {
+	RedisUrl      string
+	RabbitMQUrl   string
+	RabbitMQQueue string
+	DatasourceUrl string
+	ApiKey        string
+	Concurrency   int
+	Noop          bool
+}
+
 // rootCmd represents the base command when called without any subcommands
 func newProcessCommand() *cobra.Command {
-	var config process.ProcessorConfig
+	var opts processorOpts
 	rootCmd := &cobra.Command{
 		Use:   "processor",
 		Short: "PGCR processor service for Rivenbot",
@@ -39,8 +50,7 @@ func newProcessCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 
-			var processor *process.PgcrProcessor
-			rabbitmq, err := rabbitmq.New[json.RawMessage](config.RabbitMQQueue, config.RabbitMQUrl)
+			rabbitmq, err := rabbitmq.New[json.RawMessage](opts.RabbitMQQueue, opts.RabbitMQUrl)
 			if err != nil {
 				slog.Error("Error happened while connecting to RabbitMQ", "error", err)
 				os.Exit(1)
@@ -48,20 +58,21 @@ func newProcessCommand() *cobra.Command {
 			defer rabbitmq.Conn.Close()
 
 			// Switch if Noop is passed in
+			var processor process.Processor[json.RawMessage]
 			switch {
-			case config.Noop:
-				processor = process.NoOpProcessor(rabbitmq, config.Goroutines)
+			case opts.Noop:
+				processor = process.NoOpProcessor[json.RawMessage]()
 			default:
 				// Check for docker secret notation, e.g., /run/secret/${my_secret}
-				if strings.HasPrefix(config.DatasourceUrl, "/") {
-					config.DatasourceUrl, err = utils.ReadSecret(config.DatasourceUrl)
+				if strings.HasPrefix(opts.DatasourceUrl, "/") {
+					opts.DatasourceUrl, err = utils.ReadSecret(opts.DatasourceUrl)
 					if err != nil {
 						slog.Error("Error while reading data source URL from within docker secret", "error", err)
 						os.Exit(1)
 					}
 				}
 
-				conn, err := db.Connect(ctx, config.DatasourceUrl)
+				conn, err := db.Connect(ctx, opts.DatasourceUrl)
 				if err != nil {
 					slog.Error("Error happened while connecting to DB", "error", err)
 					os.Exit(1)
@@ -75,46 +86,50 @@ func newProcessCommand() *cobra.Command {
 				}
 
 				redis := redis.NewClient(&redis.Options{
-					Addr:     config.RedisUrl,
+					Addr:     opts.RedisUrl,
 					Password: "",
 					DB:       0,
 					Protocol: 2,
 				})
 				defer redis.Close()
 
-				fetcher := bungie.BungieManifestFetcher[manifest.Response](http.DefaultClient, config.ApiKey)
-				cacheService := cache.NewService(redis, 12*time.Hour, fetcher)
+				fetcher := bungie.BungieManifestFetcher[manifest.Response](http.DefaultClient, opts.ApiKey)
+				cacheService := cache.New(redis, 12*time.Hour, fetcher)
 				mapper := mapper.New(cacheService)
 
-				processor = process.NewDefaultProcessor(conn, queries, rabbitmq, mapper, cacheService, config.Goroutines)
+				processor = process.NewPgcrProcessor(conn, queries, mapper, cacheService)
 			}
-			return runProcessor(cmd.Context(), processor, config.Noop)
+
+			worker := runner.NewWorker(processor, rabbitmq)
+
+			return runProcessor(cmd.Context(), worker, opts.Concurrency)
 		},
 	}
 
 	flags := rootCmd.Flags()
-	flags.StringVar(&config.DatasourceUrl, "database-url", "", "Database URL to connect to")
-	flags.StringVar(&config.RedisUrl, "redis-url", "", "URL to reach Redis")
-	flags.IntVar(&config.Goroutines, "goroutines", 1, "Number of goroutines to spin up")
-	flags.StringVar(&config.RabbitMQUrl, "rabbitmq-url", "", "URL to reach RabbitMQ")
-	flags.StringVar(&config.RabbitMQQueue, "rabbitmq-queue", "rivenbot", "RabbitMQ queue name")
-	flags.StringVar(&config.ApiKey, "api-key", "", "Bungie API key for manifest requests")
-	flags.BoolVar(&config.Noop, "noop", false, "Whether this processor will do something when consuming")
+	flags.StringVar(&opts.DatasourceUrl, "database-url", "", "Database URL to connect to")
+	flags.StringVar(&opts.RedisUrl, "redis-url", "", "URL to reach Redis")
+	flags.IntVar(&opts.Concurrency, "goroutines", 1, "Number of goroutines to spin up")
+	flags.StringVar(&opts.RabbitMQUrl, "rabbitmq-url", "", "URL to reach RabbitMQ")
+	flags.StringVar(&opts.RabbitMQQueue, "rabbitmq-queue", "rivenbot", "RabbitMQ queue name")
+	flags.StringVar(&opts.ApiKey, "api-key", "", "Bungie API key for manifest requests")
+	flags.BoolVar(&opts.Noop, "noop", false, "Whether this processor will do something when consuming")
 
 	return rootCmd
 }
 
-func runProcessor(ctx context.Context, processor *process.PgcrProcessor, noop bool) error {
+func runProcessor(ctx context.Context, worker *runner.Worker[json.RawMessage], concurrency int) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGQUIT)
 	defer cancel()
 
 	var wg sync.WaitGroup
-	for i := range processor.Concurrency {
+	for i := range concurrency {
 		wg.Go(func() {
 			slog.Info("Starting worker", "Id", i)
-			err := processor.BeginProcessing(ctx, i, noop)
+			err := worker.Begin(ctx)
 			if err != nil {
-				slog.Error("Something bad happened", "error", err)
+				slog.Error("Someting went wrong while processing", "error", err)
+				return
 			}
 			slog.Info("Shutting down worker", "Id", i)
 		})

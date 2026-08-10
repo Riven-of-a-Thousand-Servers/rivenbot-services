@@ -1,12 +1,6 @@
-package pgcrdataset
+package ui
 
 import "time"
-
-type DatasetEntry struct {
-	Filename string
-	Bytes    []byte
-	Number   int64
-}
 
 type EventType int
 
@@ -15,6 +9,7 @@ const (
 	FileStarted
 	FileProgress
 	FileCompleted
+	FileError
 )
 
 type Event struct {

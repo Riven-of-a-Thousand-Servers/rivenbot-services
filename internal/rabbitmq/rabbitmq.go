@@ -122,7 +122,7 @@ func (r *RabbitMQ[T]) Consume(ctx context.Context) (<-chan consumer.Delivery[T],
 				}
 
 				delivery := consumer.Delivery[T]{
-					Item:    item,
+					Payload: item,
 					Headers: d.Headers,
 					Ack:     func() error { return d.Ack(false) },
 					Nack:    func(requeue bool) error { return d.Nack(false, requeue) },

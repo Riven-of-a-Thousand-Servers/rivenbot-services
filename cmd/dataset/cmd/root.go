@@ -13,13 +13,16 @@ import (
 
 	"pgcr-processing-service/internal/bungie"
 	"pgcr-processing-service/internal/cache"
+	"pgcr-processing-service/internal/consumer"
 	"pgcr-processing-service/internal/db"
-	pgcrdataset "pgcr-processing-service/internal/jobs/pgcr-dataset"
-	"pgcr-processing-service/internal/jobs/pgcr-dataset/ui"
 	"pgcr-processing-service/internal/mapper"
 	"pgcr-processing-service/internal/process"
 	"pgcr-processing-service/internal/pubsub"
+	"pgcr-processing-service/internal/runner"
+	ui "pgcr-processing-service/internal/tui"
+	"pgcr-processing-service/internal/types/dataset"
 	"pgcr-processing-service/internal/types/manifest"
+	uiEvents "pgcr-processing-service/internal/types/ui"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/redis/go-redis/v9"
@@ -32,6 +35,7 @@ type datasetOpts struct {
 	DbUrl      string
 	ApiKey     string
 	Goroutines int
+	Noop       bool
 }
 
 func newRootCommand() *cobra.Command {
@@ -59,17 +63,12 @@ dataset`,
 
 			g, ctx := errgroup.WithContext(ctx)
 
-			discoverer := pgcrdataset.NewDiscoverer(opts.RootDir)
+			discoverer := consumer.NewDiscoverer(opts.RootDir)
 			g.Go(func() error {
 				return discoverer.Discover(ctx, ".zst")
 			})
 
-			input := make(chan pgcrdataset.DatasetEntry, 1500)
-			ingester := pgcrdataset.NewIngester(&discoverer.Files, input)
-
-			g.Go(func() error {
-				return ingester.Start(cmd.Context())
-			})
+			consumer := consumer.NewDatasetConsumer(&discoverer.Files)
 
 			conn, err := db.Connect(ctx, opts.DbUrl)
 			if err != nil {
@@ -91,22 +90,30 @@ dataset`,
 			defer redis.Close()
 
 			fetcher := bungie.BungieManifestFetcher[manifest.Response](http.DefaultClient, opts.ApiKey)
-			cacheService := cache.NewService(redis, 12*time.Hour, fetcher)
-			mapper := mapper.New(cacheService)
-			processor := process.NewDatasetProcessor(conn, queries, mapper, cacheService)
+			cache := cache.New(redis, 12*time.Hour, fetcher)
+			mapper := mapper.New(cache)
+			inner := process.NewPgcrProcessor(conn, queries, mapper, cache)
+			broker := pubsub.NewBroker[uiEvents.Event](2048)
 
-			worker := pgcrdataset.NewWorker(processor)
-			for range opts.Goroutines {
-				g.Go(func() error {
-					return worker.Start(ctx, input)
-				})
-			}
-
-			broker := pubsub.NewBroker[pgcrdataset.Event](256)
 			defer broker.Shutdown()
 
 			events, unsub := broker.Subscribe()
 			defer unsub()
+
+			var processor process.Processor[dataset.Entry]
+			switch {
+			case opts.Noop:
+				processor = process.NoOpProcessor[dataset.Entry]()
+			default:
+				processor = process.NewDatasetProcessor(inner, broker)
+			}
+
+			worker := runner.NewWorker(processor, consumer)
+			for range opts.Goroutines {
+				g.Go(func() error {
+					return worker.Begin(ctx)
+				})
+			}
 
 			g.Go(func() error {
 				if _, err := tea.NewProgram(ui.NewModel(events, len(discoverer.Files))).Run(); err != nil {
@@ -129,6 +136,7 @@ dataset`,
 	flags.StringVarP(&opts.RootDir, "root-dir", "r", "", "Root directory to scan files from")
 	flags.StringVarP(&opts.DbUrl, "db-url", "d", "", "URL to the Postgres DB")
 	flags.StringVarP(&opts.ApiKey, "api-key", "a", "", "Bungie.net API key")
+	flags.BoolVar(&opts.Noop, "noop", false, "If the processor to be used is a Noop processor")
 	flags.IntVarP(&opts.Goroutines, "goroutines", "g", 1, "Number of workers to spin up")
 	return cmd
 }

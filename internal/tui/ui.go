@@ -3,7 +3,7 @@ package ui
 import (
 	"time"
 
-	pgcrdataset "pgcr-processing-service/internal/jobs/pgcr-dataset"
+	uiEvents "pgcr-processing-service/internal/types/ui"
 
 	"charm.land/bubbles/v2/progress"
 	tea "charm.land/bubbletea/v2"
@@ -25,7 +25,7 @@ type fileState struct {
 }
 
 type Model struct {
-	ch <-chan pgcrdataset.Event
+	ch <-chan uiEvents.Event
 
 	mode       viewMode
 	inFlight   map[string]*fileState
@@ -36,7 +36,7 @@ type Model struct {
 	quitting   bool
 }
 
-func NewModel(ch <-chan pgcrdataset.Event, filesTotal int) Model {
+func NewModel(ch <-chan uiEvents.Event, filesTotal int) Model {
 	return Model{
 		ch:         ch,
 		inFlight:   make(map[string]*fileState),
@@ -72,19 +72,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-	// Broker events related to dataset events
-	case pgcrdataset.Event:
+	// Broker events related to uiEvents events
+	case uiEvents.Event:
 		var cmds []tea.Cmd
 		cmds = append(cmds, WaitForEvent(m.ch))
 
 		switch msg.Type {
-		case pgcrdataset.FileStarted:
+		case uiEvents.FileStarted:
 			m.inFlight[msg.Filename] = &fileState{
 				bar:       progress.New(progress.WithDefaultBlend()),
 				rowsTotal: 10_000_000,
 				startedAt: time.Now(),
 			}
-		case pgcrdataset.FileProgress:
+		case uiEvents.FileProgress:
 			if state, ok := m.inFlight[msg.Filename]; ok {
 				state.rowsDone = msg.RowsDone
 				if msg.Err != nil {
@@ -97,7 +97,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				cmds = append(cmds, state.bar.SetPercent(pct))
 			}
-		case pgcrdataset.FileCompleted:
+		case uiEvents.FileCompleted:
 			delete(m.inFlight, msg.Filename)
 			m.filesDone++
 			if msg.Err != nil {

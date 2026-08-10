@@ -1,4 +1,4 @@
-package pgcrdataset
+package consumer
 
 import (
 	"context"
@@ -18,10 +18,9 @@ type FileDiscoverer struct {
 }
 
 type FileEntry struct {
-	Name     string
-	Started  bool
-	Done     bool
-	Progress chan int64
+	Name    string
+	Started bool
+	Done    bool
 }
 
 func NewDiscoverer(root string) *FileDiscoverer {

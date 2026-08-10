@@ -22,7 +22,7 @@ type CacheService[T any] struct {
 	fetch Fetcher[T]
 }
 
-func NewService[T any](redis *redis.Client, ttl time.Duration, fetch Fetcher[T]) *CacheService[T] {
+func New[T any](redis *redis.Client, ttl time.Duration, fetch Fetcher[T]) *CacheService[T] {
 	return &CacheService[T]{redis: redis, fetch: fetch, ttl: ttl}
 }
 

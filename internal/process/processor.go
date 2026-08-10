@@ -5,99 +5,33 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strconv"
-	"strings"
 	"time"
 
 	"pgcr-processing-service/internal/cache"
 	"pgcr-processing-service/internal/compress"
-	"pgcr-processing-service/internal/consumer"
 	"pgcr-processing-service/internal/db"
 	"pgcr-processing-service/internal/mapper"
 	"pgcr-processing-service/internal/types/manifest"
 	"pgcr-processing-service/internal/types/pgcr"
+	types "pgcr-processing-service/internal/types/processor"
 	"pgcr-processing-service/internal/utils"
-
-	"github.com/rabbitmq/amqp091-go"
 )
-
-type Source int
-
-const (
-	Crawler Source = iota + 1
-	Dataset
-)
-
-var sources map[Source]string = map[Source]string{
-	Crawler: "crawler",
-	Dataset: "dataset",
-}
-
-var reverseSources map[string]Source = map[string]Source{
-	"crawler": Crawler,
-	"dataset": Dataset,
-}
-
-type Status int
-
-const (
-	started Status = iota + 1
-	processing
-	errored
-	success
-)
-
-var statuses map[Status]string = map[Status]string{
-	started:    "started",
-	processing: "processing",
-	errored:    "error",
-	success:    "success",
-}
-
-// This is the duration after which an entry in the Ledger is
-// marked as stale
-const staleThreshold = 5 * time.Minute
 
 type Processor[T any] interface {
-	Process(context.Context, consumer.Delivery[T])
+	ProcessPgcr(context.Context, T, types.Source) error
 }
 
 type PgcrProcessor struct {
-	db          *sql.DB
-	Concurrency int
-	queries     *db.Queries
-	consumer    consumer.Consumer[json.RawMessage]
-	mapper      *mapper.PgcrMapper
-	cache       cache.Service[manifest.Response]
+	db      *sql.DB
+	queries *db.Queries
+	mapper  *mapper.PgcrMapper
+	cache   cache.Service[manifest.Response]
 }
 
 // Full Processor with RabbitMQ as an extra dependency
-func NewDefaultProcessor(db *sql.DB,
-	queries *db.Queries,
-	consumer consumer.Consumer[json.RawMessage],
-	mapper *mapper.PgcrMapper,
-	redis cache.Service[manifest.Response],
-	concurrency int,
-) *PgcrProcessor {
-	return &PgcrProcessor{
-		db:          db,
-		queries:     queries,
-		consumer:    consumer,
-		mapper:      mapper,
-		cache:       redis,
-		Concurrency: concurrency,
-	}
-}
-
-func NoOpProcessor(c consumer.Consumer[json.RawMessage], goroutines int) *PgcrProcessor {
-	return &PgcrProcessor{consumer: c, Concurrency: goroutines}
-}
-
-// This dataset processor doesnt require a RabbitMQ broker
-// since it'll be calling processPgcr() directly
-func NewDatasetProcessor(db *sql.DB,
+func NewPgcrProcessor(db *sql.DB,
 	queries *db.Queries,
 	mapper *mapper.PgcrMapper,
 	cache cache.Service[manifest.Response],
@@ -110,54 +44,9 @@ func NewDatasetProcessor(db *sql.DB,
 	}
 }
 
-// BeginProcessing handles messages received from RabbitMQ to process PGCRs into the postgres db
-func (p *PgcrProcessor) BeginProcessing(ctx context.Context, id int, noop bool) error {
-	deliveries, err := p.consumer.Consume(ctx)
-	if err != nil {
-		return err
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			slog.Info("Consumer shutting down", "Id", id)
-			return ctx.Err()
-		case delivery, ok := <-deliveries:
-			if !ok {
-				slog.Info("Delivery channel closed by the broker", "Id", id)
-				return nil
-			}
-			p.Process(ctx, delivery, noop)
-		}
-	}
-}
-
-func (p *PgcrProcessor) Process(ctx context.Context, delivery consumer.Delivery[json.RawMessage], noop bool) {
-	if noop {
-		slog.Info("Processed Pgcr! (Noop)")
-		delivery.Ack()
-		return
-	}
-
-	source, err := extractSource(delivery.Headers)
-	if err != nil {
-		slog.Warn("Unable to extract PGCR source from amqp headers", "error", err)
-		delivery.Nack(false)
-		return
-	}
-
-	if err := p.ProcessPgcr(ctx, delivery.Item, source); err != nil {
-		slog.Error("Error processing pgcr", "error", err)
-		delivery.Nack(false)
-		return
-	}
-
-	delivery.Ack()
-}
-
 // This method takes in raw bytes and has no acknowledgement of RabbitMQ
 // Its the core processing logic that will be saved to the DB
-func (p *PgcrProcessor) ProcessPgcr(ctx context.Context, raw []byte, source Source) error {
+func (p *PgcrProcessor) ProcessPgcr(ctx context.Context, raw json.RawMessage, source types.Source) error {
 	var pgcr pgcr.PostGameCarnageReportResponse
 	err := json.Unmarshal(raw, &pgcr)
 	if err != nil {
@@ -226,7 +115,7 @@ func (p *PgcrProcessor) ProcessPgcr(ctx context.Context, raw []byte, source Sour
 func (p *PgcrProcessor) LedgerMarkSuccess(ctx context.Context, queries *db.Queries, instanceId int64) error {
 	return queries.UpdateLogEntryStatus(ctx, db.UpdateLogEntryStatusParams{
 		InstanceID: instanceId,
-		Status:     statuses[success],
+		Status:     types.Statuses[types.Success],
 		Error:      sql.NullString{Valid: false},
 	})
 }
@@ -234,18 +123,18 @@ func (p *PgcrProcessor) LedgerMarkSuccess(ctx context.Context, queries *db.Queri
 func (p *PgcrProcessor) LedgerMarkError(ctx context.Context, queries *db.Queries, instanceId int64, cause error) error {
 	return queries.UpdateLogEntryStatus(ctx, db.UpdateLogEntryStatusParams{
 		InstanceID: instanceId,
-		Status:     statuses[errored],
+		Status:     types.Statuses[types.Errored],
 		Error:      sql.NullString{String: cause.Error(), Valid: cause.Error() != ""},
 	})
 }
 
 // Saves a processed pgcr to the Postgres DB
-func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcr.PgcrInfo, source Source, b []byte) error {
+func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcr.PgcrInfo, source types.Source, b []byte) error {
 	// If inserting to the ledger fails, skip inserting to the DB
 	entry, err := p.queries.CreateLogEntry(ctx, db.CreateLogEntryParams{
 		InstanceID: pgcr.InstanceId,
-		Source:     sources[source],
-		Status:     statuses[started],
+		Source:     types.Sources[source],
+		Status:     types.Statuses[types.Started],
 	})
 	if err != nil {
 		slog.Error("Failed to insert to ingestion log", "instanceId", pgcr.InstanceId, "error", err)
@@ -253,19 +142,19 @@ func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcr.Pg
 	}
 
 	switch entry.Status {
-	case statuses[success]:
+	case types.Statuses[types.Success]:
 		slog.Info("Instanced already processed successfully, skipping", "instanceId", pgcr.InstanceId)
 		return nil
-	case statuses[errored]:
+	case types.Statuses[types.Errored]:
 		slog.Warn("Retrying previously failed instance", "instanceId", pgcr.InstanceId)
-	case statuses[processing]:
-		if time.Since(entry.LastAttemptAt) > staleThreshold {
+	case types.Statuses[types.Processing]:
+		if time.Since(entry.LastAttemptAt) > types.StaleThreshold {
 			slog.Warn("Reclaiming stale processing entry", "instanceId", pgcr.InstanceId)
 		} else {
 			slog.Info("Instance actively being processed elsewhere, skipping", "instanceId", pgcr.InstanceId)
 			return nil
 		}
-	case statuses[started]:
+	case types.Statuses[types.Started]:
 	}
 
 	claimed, err := p.queries.ClaimLogEntryForProcessing(ctx, db.ClaimLogEntryForProcessingParams{
@@ -421,23 +310,4 @@ func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcr.Pg
 		}
 	}
 	return nil
-}
-
-func extractSource(headers amqp091.Table) (Source, error) {
-	raw, ok := headers["source"]
-	if !ok {
-		return 0, fmt.Errorf("missing source header")
-	}
-
-	str, ok := raw.(string)
-	if !ok {
-		return 0, fmt.Errorf("source header is not a string, got %T", raw)
-	}
-
-	src, ok := reverseSources[strings.ToLower(str)]
-	if !ok {
-		return 0, fmt.Errorf("unrecognized source value: %q", str)
-	}
-
-	return src, nil
 }
