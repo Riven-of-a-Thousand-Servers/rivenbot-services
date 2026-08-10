@@ -3,17 +3,15 @@ module pgcr-processing-service
 go 1.26
 
 require (
-	github.com/Riven-of-a-Thousand-Servers/rivenbot-commons v0.0.0-20250424041011-0df78405fde7
-	github.com/google/go-cmp v0.6.0
-	github.com/joho/godotenv v1.5.1
+	charm.land/bubbletea/v2 v2.0.7
 	github.com/pressly/goose/v3 v3.27.2
 	github.com/rabbitmq/amqp091-go v1.10.0
 	github.com/redis/go-redis/v9 v9.7.0
+	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 )
 
 require (
-	charm.land/bubbletea/v2 v2.0.7 // indirect
 	charm.land/lipgloss/v2 v2.0.4 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
 	github.com/charmbracelet/harmonica v0.2.0 // indirect
@@ -39,7 +37,6 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/rogpeppe/go-internal v1.15.0 // indirect
-	github.com/spf13/cobra v1.10.2 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/sys v0.46.0 // indirect
@@ -56,14 +53,12 @@ require (
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/klauspost/compress v1.19.2
-	github.com/mattn/go-sqlite3 v1.14.49
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/sethvargo/go-retry v0.3.0 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
-	github.com/yuin/goldmark v1.8.5
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/sync v0.21.0 // indirect
+	golang.org/x/sync v0.21.0
 	golang.org/x/time v0.15.0
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/sqlite v1.55.0
