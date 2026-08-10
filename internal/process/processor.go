@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strconv"
 	"time"
@@ -14,9 +15,8 @@ import (
 	"pgcr-processing-service/internal/db"
 	"pgcr-processing-service/internal/mapper"
 	"pgcr-processing-service/internal/types/manifest"
-	"pgcr-processing-service/internal/types/pgcr"
+	pgcrs "pgcr-processing-service/internal/types/pgcr"
 	types "pgcr-processing-service/internal/types/processor"
-	"pgcr-processing-service/internal/utils"
 )
 
 type Processor[T any] interface {
@@ -47,7 +47,7 @@ func NewPgcrProcessor(db *sql.DB,
 // This method takes in raw bytes and has no acknowledgement of RabbitMQ
 // Its the core processing logic that will be saved to the DB
 func (p *PgcrProcessor) ProcessPgcr(ctx context.Context, raw json.RawMessage, source types.Source) error {
-	var pgcr pgcr.PostGameCarnageReportResponse
+	var pgcr pgcrs.Response
 	err := json.Unmarshal(raw, &pgcr)
 	if err != nil {
 		slog.Error("Error unmarshalling body from message", "Error", err)
@@ -115,7 +115,7 @@ func (p *PgcrProcessor) ProcessPgcr(ctx context.Context, raw json.RawMessage, so
 func (p *PgcrProcessor) LedgerMarkSuccess(ctx context.Context, queries *db.Queries, instanceId int64) error {
 	return queries.UpdateLogEntryStatus(ctx, db.UpdateLogEntryStatusParams{
 		InstanceID: instanceId,
-		Status:     types.Statuses[types.Success],
+		Status:     types.Success.String(),
 		Error:      sql.NullString{Valid: false},
 	})
 }
@@ -123,38 +123,44 @@ func (p *PgcrProcessor) LedgerMarkSuccess(ctx context.Context, queries *db.Queri
 func (p *PgcrProcessor) LedgerMarkError(ctx context.Context, queries *db.Queries, instanceId int64, cause error) error {
 	return queries.UpdateLogEntryStatus(ctx, db.UpdateLogEntryStatusParams{
 		InstanceID: instanceId,
-		Status:     types.Statuses[types.Errored],
+		Status:     types.Errored.String(),
 		Error:      sql.NullString{String: cause.Error(), Valid: cause.Error() != ""},
 	})
 }
 
 // Saves a processed pgcr to the Postgres DB
-func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcr.PgcrInfo, source types.Source, b []byte) error {
+func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcrs.PgcrInfo, source types.Source, b []byte) error {
 	// If inserting to the ledger fails, skip inserting to the DB
 	entry, err := p.queries.CreateLogEntry(ctx, db.CreateLogEntryParams{
 		InstanceID: pgcr.InstanceId,
-		Source:     types.Sources[source],
-		Status:     types.Statuses[types.Started],
+		Source:     source.String(),
+		Status:     types.Started.String(),
 	})
 	if err != nil {
 		slog.Error("Failed to insert to ingestion log", "instanceId", pgcr.InstanceId, "error", err)
 		return err
 	}
 
-	switch entry.Status {
-	case types.Statuses[types.Success]:
+	status, ok := types.ParseStatus(entry.Status)
+	if !ok {
+		slog.Error("Unable to parse status", "value", entry.Status)
+		return fmt.Errorf("Unknown status: %s", entry.Status)
+	}
+
+	switch status {
+	case types.Success:
 		slog.Info("Instanced already processed successfully, skipping", "instanceId", pgcr.InstanceId)
 		return nil
-	case types.Statuses[types.Errored]:
+	case types.Errored:
 		slog.Warn("Retrying previously failed instance", "instanceId", pgcr.InstanceId)
-	case types.Statuses[types.Processing]:
+	case types.Processing:
 		if time.Since(entry.LastAttemptAt) > types.StaleThreshold {
 			slog.Warn("Reclaiming stale processing entry", "instanceId", pgcr.InstanceId)
 		} else {
 			slog.Info("Instance actively being processed elsewhere, skipping", "instanceId", pgcr.InstanceId)
 			return nil
 		}
-	case types.Statuses[types.Started]:
+	case types.Started:
 	}
 
 	claimed, err := p.queries.ClaimLogEntryForProcessing(ctx, db.ClaimLogEntryForProcessingParams{
@@ -285,8 +291,8 @@ func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcr.Pg
 					WeaponHash:    ciw.WeaponHash,
 					IconUrl:       manifestEntity.Response.DisplayProperties.Icon,
 					WeaponName:    manifestEntity.Response.DisplayProperties.Name,
-					DamageType:    string(utils.GetDamageType(manifestEntity.Response.EquippingBlock.AmmoType)),
-					EquipmentSlot: string(utils.GetEquippingSlot(manifestEntity.Response.EquippingBlock.EquipmentSlotTypeHash)),
+					DamageType:    pgcrs.GetDamageType(manifestEntity.Response.EquippingBlock.AmmoType).String(),
+					EquipmentSlot: pgcrs.GetEquippingSlot(manifestEntity.Response.EquippingBlock.EquipmentSlotTypeHash).String(),
 				}); err != nil {
 					slog.Error("Failed to save weapon", "weaponId", strHash)
 					return err

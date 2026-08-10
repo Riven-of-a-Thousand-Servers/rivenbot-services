@@ -3,7 +3,6 @@ package consumer
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"pgcr-processing-service/internal/types/processor"
 )
@@ -36,10 +35,10 @@ func (d Delivery[T]) GetSource() (processor.Source, error) {
 		return 0, fmt.Errorf("source header is not a string, got %T", raw)
 	}
 
-	src, ok := processor.ReverseSources[strings.ToLower(str)]
+	source, ok := processor.ParseSource(str)
 	if !ok {
 		return 0, fmt.Errorf("unrecognized source value: %q", str)
 	}
 
-	return src, nil
+	return source, nil
 }

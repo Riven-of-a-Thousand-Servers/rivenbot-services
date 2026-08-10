@@ -10,7 +10,6 @@ import (
 	"pgcr-processing-service/internal/cache"
 	"pgcr-processing-service/internal/types/manifest"
 	"pgcr-processing-service/internal/types/pgcr"
-	"pgcr-processing-service/internal/utils"
 )
 
 type PgcrMapper struct {
@@ -76,7 +75,7 @@ func (p *PgcrMapper) enrichPgcrInfo(report *pgcr.PostGameCarnageReport) (*pgcr.P
 		return nil, err
 	}
 
-	raidName, raidDifficulty, err := utils.GetRaidAndDifficulty(res.Response.DisplayProperties.Name)
+	raidName, raidDifficulty, err := pgcr.GetRaidAndDifficulty(res.Response.DisplayProperties.Name)
 	if err != nil {
 		slog.Error("Unable to parse activity raid name and raid difficulty", "error", err)
 		return nil, err

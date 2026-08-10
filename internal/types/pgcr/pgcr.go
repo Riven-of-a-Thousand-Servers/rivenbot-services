@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-type PostGameCarnageReportResponse struct {
+type Response struct {
 	Response        PostGameCarnageReport `json:"Response"`
 	ErrorCode       int                   `json:"ErrorCode"`
 	ErrorStatus     string                `json:"ErrorStatus"`

@@ -49,7 +49,7 @@ func TestExtractInfo_ShouldWorkForDatasetPgcr(t *testing.T) {
 	}
 }
 
-func openPgcr(t *testing.T, filename string) *pgcr.PostGameCarnageReportResponse {
+func openPgcr(t *testing.T, filename string) *pgcr.Response {
 	t.Helper()
 	bytes, err := os.ReadFile(filepath.Join("./testdata/", filename))
 	if err != nil {
@@ -57,7 +57,7 @@ func openPgcr(t *testing.T, filename string) *pgcr.PostGameCarnageReportResponse
 		return nil
 	}
 
-	var pgcr pgcr.PostGameCarnageReportResponse
+	var pgcr pgcr.Response
 	if err = json.Unmarshal(bytes, &pgcr); err != nil {
 		t.Fatalf("Error marshaling pgcr for file %s: %v", filename, err)
 	}
