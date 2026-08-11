@@ -124,5 +124,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // TODO: Write the visual portion for each stylized bar and file discovery
 func (m Model) View() tea.View {
-	return tea.NewView("Hello!")
+	return tea.NewView(m.headerView() + "\n" + m.barsView())
+}
+
+// TODO: Finish setting up the core view for the progres bars
+func (m Model) barsView() string {
+	return ""
+}
+
+// TODO: Finish setting the dynamic view for the header
+func (m Model) headerView() string {
+	return ""
 }
