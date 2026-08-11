@@ -1,13 +1,17 @@
 package ui
 
 import (
+	"fmt"
 	"time"
 
 	uiEvents "pgcr-processing-service/internal/types/ui"
 
 	"charm.land/bubbles/v2/progress"
+	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
 )
+
+const rowsPerFile = 10_000_000
 
 type viewMode int
 
@@ -28,7 +32,9 @@ type Model struct {
 	ch <-chan uiEvents.Event
 
 	mode       viewMode
+	tbl        table.Model
 	inFlight   map[string]*fileState
+	startedAt  time.Time
 	filesTotal int
 	filesDone  int
 	errored    int
@@ -41,6 +47,8 @@ func NewModel(ch <-chan uiEvents.Event, filesTotal int) Model {
 		ch:         ch,
 		inFlight:   make(map[string]*fileState),
 		filesTotal: filesTotal,
+		tbl:        newTable(),
+		startedAt:  time.Now(),
 	}
 }
 
@@ -61,7 +69,7 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "+":
 			if m.mode == compactView {
@@ -70,6 +78,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.mode = compactView
 			}
 			return m, nil
+		case "q", "ctrl+c":
+			return m, tea.Quit
 		}
 
 	// Broker events related to uiEvents events
@@ -81,7 +91,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case uiEvents.FileStarted:
 			m.inFlight[msg.Filename] = &fileState{
 				bar:       progress.New(progress.WithDefaultBlend()),
-				rowsTotal: 10_000_000,
+				rowsTotal: rowsPerFile,
 				startedAt: time.Now(),
 			}
 		case uiEvents.FileProgress:
@@ -105,6 +115,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		m.tbl.SetRows(m.tableRows())
 		return m, tea.Batch(cmds...)
 
 	// Update the in-flight progress bars
@@ -122,8 +133,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// TODO: Write the visual portion for each stylized bar and file discovery
 func (m Model) View() tea.View {
+	if m.quitting {
+		return tea.NewView("")
+	}
 	return tea.NewView(m.headerView() + "\n" + m.barsView())
 }
 
@@ -132,7 +145,68 @@ func (m Model) barsView() string {
 	return ""
 }
 
-// TODO: Finish setting the dynamic view for the header
 func (m Model) headerView() string {
-	return ""
+	status := "processing"
+	if m.done {
+		status = "done"
+	}
+
+	elapsed := time.Since(m.startedAt).Round(time.Second)
+
+	var totalRowsDone int64
+	for _, fs := range m.inFlight {
+		totalRowsDone += int64(fs.rowsDone)
+	}
+
+	completedRows := int64(m.filesDone) + int64(rowsPerFile)
+	rate := float64(completedRows+totalRowsDone) / max(elapsed.Seconds(), 0.0001)
+
+	return fmt.Sprintf(
+		"PGCR dataset import — %s\nFiles: %d/%d   errors: %d   elapsed: %s   throughput: %.0f rows/s\n[+] toggle detail   [q] quit",
+		status, m.filesDone, m.filesTotal, m.errored, elapsed, rate,
+	)
+}
+
+func (m Model) tableRows() []table.Row {
+	rows := make([]table.Row, 0, len(m.inFlight))
+	for name, state := range m.inFlight {
+		pct := 0.0
+		if state.rowsTotal > 0 {
+			pct = float64(state.rowsDone) / float64(state.rowsTotal)
+		}
+		elapsed := time.Since(state.startedAt)
+		rate := float64(state.rowsDone) / max(elapsed.Seconds(), 0.0001)
+		eta := time.Duration(float64(state.rowsTotal-state.rowsDone)/max(rate, 0.0001)) * time.Second
+
+		rows = append(rows, table.Row{
+			truncate(name, 28),
+			fmt.Sprintf("%.1f%%", pct*100),
+			fmt.Sprintf("%d/%d", state.rowsDone, state.rowsTotal),
+			fmt.Sprintf("%.0f/s", rate),
+			eta.Round(time.Second).String(),
+			fmt.Sprintf("%d", state.errCount),
+		})
+	}
+
+	return rows
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n-3] + "..."
+}
+
+func newTable() table.Model {
+	columns := []table.Column{
+		{Title: "File", Width: 30},
+		{Title: "Progress", Width: 12},
+		{Title: "Rows", Width: 20},
+		{Title: "Rate", Width: 12},
+		{Title: "ETA", Width: 10},
+		{Title: "Errors", Width: 8},
+	}
+
+	return table.New(table.WithColumns(columns), table.WithFocused(false))
 }
