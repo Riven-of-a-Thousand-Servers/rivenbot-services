@@ -12,7 +12,6 @@ type FileIndex map[string]*FileEntry
 
 type FileDiscoverer struct {
 	Root      string
-	Files     FileIndex
 	Started   chan string
 	Completed chan string
 }
@@ -27,7 +26,7 @@ func NewDiscoverer(root string) *FileDiscoverer {
 	return &FileDiscoverer{Root: root}
 }
 
-func (f *FileDiscoverer) Discover(ctx context.Context, extension string) error {
+func (f *FileDiscoverer) Discover(ctx context.Context, extension string) (FileIndex, error) {
 	entries := make(map[string]*FileEntry)
 	walkFunc := func(path string, d fs.DirEntry, err error) error {
 		if ctx.Err() != nil {
@@ -55,5 +54,9 @@ func (f *FileDiscoverer) Discover(ctx context.Context, extension string) error {
 		return nil
 	}
 
-	return filepath.WalkDir(f.Root, walkFunc)
+	if err := filepath.WalkDir(f.Root, walkFunc); err != nil {
+		return nil, err
+	}
+
+	return entries, nil
 }

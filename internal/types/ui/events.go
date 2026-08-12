@@ -19,3 +19,6 @@ type Event struct {
 	Elapsed  time.Duration
 	Err      error
 }
+
+// Special message that tells the UI that the context was cancelled
+type CtxCancelledMsg struct{}

@@ -61,41 +61,19 @@ dataset`,
 
 			slog.SetDefault(slog.New(slog.NewJSONHandler(logFile, nil)))
 
-			g, ctx := errgroup.WithContext(ctx)
-
+			// Discover all .zst files before anything
+			// This cannot fail, otherwise everything goes to shit
 			discoverer := consumer.NewDiscoverer(opts.RootDir)
-			g.Go(func() error {
-				return discoverer.Discover(ctx, ".zst")
-			})
-
-			consumer := consumer.NewDatasetConsumer(&discoverer.Files)
-
-			conn, err := db.Connect(ctx, opts.DbUrl)
-			if err != nil {
-				return err
-			}
-			defer conn.Close()
-
-			queries, err := db.Prepare(ctx, conn)
+			files, err := discoverer.Discover(ctx, ".zst")
 			if err != nil {
 				return err
 			}
 
-			redis := redis.NewClient(&redis.Options{
-				Addr:     "redis:6379",
-				Password: "",
-				DB:       0,
-				Protocol: 2,
-			})
-			defer redis.Close()
-
-			fetcher := bungie.BungieManifestFetcher[manifest.Response](http.DefaultClient, opts.ApiKey)
-			cache := cache.New(redis, 12*time.Hour, fetcher)
-			mapper := mapper.New(cache)
-			inner := process.NewPgcrProcessor(conn, queries, mapper, cache)
+			g, ctx := errgroup.WithContext(ctx)
 			broker := pubsub.NewBroker[uiEvents.Event](2048)
-
 			defer broker.Shutdown()
+
+			consumer := consumer.NewDatasetConsumer(files, broker)
 
 			events, unsub := broker.Subscribe()
 			defer unsub()
@@ -105,6 +83,30 @@ dataset`,
 			case opts.Noop:
 				processor = process.NoOpProcessor[dataset.Entry]()
 			default:
+				conn, err := db.Connect(ctx, opts.DbUrl)
+				if err != nil {
+					return err
+				}
+				defer conn.Close()
+
+				queries, err := db.Prepare(ctx, conn)
+				if err != nil {
+					return err
+				}
+
+				redis := redis.NewClient(&redis.Options{
+					Addr:     "redis:6379",
+					Password: "",
+					DB:       0,
+					Protocol: 2,
+				})
+				defer redis.Close()
+
+				fetcher := bungie.BungieManifestFetcher[manifest.Response](http.DefaultClient, opts.ApiKey)
+				cache := cache.New(redis, 12*time.Hour, fetcher)
+				mapper := mapper.New(cache)
+				inner := process.NewPgcrProcessor(conn, queries, mapper, cache)
+
 				processor = process.NewDatasetProcessor(inner, broker)
 			}
 
@@ -115,15 +117,26 @@ dataset`,
 				})
 			}
 
+			programDone := make(chan struct{})
+			program := tea.NewProgram(ui.NewModel(events, len(files)))
+			// This small Goroutine watches for context cancellation and passes it along to the UI
 			g.Go(func() error {
-				if _, err := tea.NewProgram(ui.NewModel(events, len(discoverer.Files))).Run(); err != nil {
-					return err
+				select {
+				case <-ctx.Done():
+					program.Send(uiEvents.CtxCancelledMsg{})
+				case <-programDone:
 				}
 				return nil
 			})
 
+			g.Go(func() error {
+				_, err := program.Run()
+				close(programDone)
+				return err
+			})
+
 			if err := g.Wait(); err == nil {
-				slog.Info("Successfully processed all the dataset!", "num of files", len(discoverer.Files))
+				slog.Info("Successfully processed all the dataset!", "num of files", len(files))
 				return nil
 			} else {
 				slog.Info("Error during execution of dataset", "error", err)
@@ -138,6 +151,7 @@ dataset`,
 	flags.StringVarP(&opts.ApiKey, "api-key", "a", "", "Bungie.net API key")
 	flags.BoolVar(&opts.Noop, "noop", false, "If the processor to be used is a Noop processor")
 	flags.IntVarP(&opts.Goroutines, "goroutines", "g", 1, "Number of workers to spin up")
+
 	return cmd
 }
 

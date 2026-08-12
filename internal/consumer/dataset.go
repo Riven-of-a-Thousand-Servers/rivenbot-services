@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"sync"
+	"time"
 
 	"pgcr-processing-service/internal/pubsub"
 	"pgcr-processing-service/internal/types/dataset"
@@ -18,12 +19,12 @@ const maxSize = 1024 * 1024 * 20 // 20 MBs
 
 type DatasetConsumer struct {
 	Broker    pubsub.Broker[uiEvents.Event]
-	FileIndex *FileIndex
+	FileIndex FileIndex
 	once      sync.Once
 	ch        chan Delivery[dataset.Entry]
 }
 
-func NewDatasetConsumer(idx *FileIndex) *DatasetConsumer {
+func NewDatasetConsumer(idx FileIndex, broker *pubsub.Broker[uiEvents.Event]) *DatasetConsumer {
 	return &DatasetConsumer{FileIndex: idx}
 }
 
@@ -39,7 +40,8 @@ func (c *DatasetConsumer) Consume(ctx context.Context) (<-chan Delivery[dataset.
 func (c *DatasetConsumer) Start(ctx context.Context) error {
 	defer close(c.ch)
 
-	for filepath, entry := range *c.FileIndex {
+	for filepath, entry := range c.FileIndex {
+		start := time.Now()
 		file, err := os.Open(filepath)
 		if err != nil {
 			slog.Error("Error while opening file", "file", file, "error", err)
@@ -60,6 +62,13 @@ func (c *DatasetConsumer) Start(ctx context.Context) error {
 		scanner.Buffer(buf, maxSize)
 
 		entry.Started = true
+
+		c.Broker.Publish(uiEvents.Event{
+			Type:     uiEvents.FileStarted,
+			RowsDone: 0,
+			Filename: file.Name(),
+			Elapsed:  time.Since(start),
+		})
 
 		count := 0
 		for scanner.Scan() {
@@ -86,6 +95,13 @@ func (c *DatasetConsumer) Start(ctx context.Context) error {
 						"source": "dataset",
 					},
 				}
+
+				c.Broker.Publish(uiEvents.Event{
+					Type:     uiEvents.FileProgress,
+					RowsDone: count,
+					Filename: file.Name(),
+					Elapsed:  time.Since(start),
+				})
 				count++
 			}
 		}

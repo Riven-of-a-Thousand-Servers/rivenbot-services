@@ -9,6 +9,7 @@ import (
 	"charm.land/bubbles/v2/progress"
 	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 const rowsPerFile = 10_000_000
@@ -19,6 +20,8 @@ const (
 	compactView viewMode = iota
 	detailedView
 )
+
+type TickMsg time.Time
 
 type fileState struct {
 	bar       progress.Model
@@ -47,9 +50,16 @@ func NewModel(ch <-chan uiEvents.Event, filesTotal int) Model {
 		ch:         ch,
 		inFlight:   make(map[string]*fileState),
 		filesTotal: filesTotal,
+		mode:       compactView,
 		tbl:        newTable(),
 		startedAt:  time.Now(),
 	}
+}
+
+func tick() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		return TickMsg(t)
+	})
 }
 
 func WaitForEvent[T any](ch <-chan T) tea.Cmd {
@@ -64,11 +74,13 @@ func WaitForEvent[T any](ch <-chan T) tea.Cmd {
 
 // Start listening for broker events
 func (m Model) Init() tea.Cmd {
-	return WaitForEvent(m.ch)
+	return tea.Batch(WaitForEvent(m.ch), tick())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case TickMsg:
+		return m, tick()
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "+":
@@ -79,6 +91,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "q", "ctrl+c":
+			m.quitting = true
 			return m, tea.Quit
 		}
 
@@ -108,7 +121,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, state.bar.SetPercent(pct))
 			}
 		case uiEvents.FileCompleted:
-			delete(m.inFlight, msg.Filename)
+			// delete(m.inFlight, msg.Filename)
 			m.filesDone++
 			if msg.Err != nil {
 				m.errored++
@@ -118,17 +131,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tbl.SetRows(m.tableRows())
 		return m, tea.Batch(cmds...)
 
-	// Update the in-flight progress bars
-	case progress.FrameMsg:
-		var cmds []tea.Cmd
-		for name, fs := range m.inFlight {
-			updated, cmd := fs.bar.Update(msg)
-			fs.bar = updated
-			cmds = append(cmds, cmd)
-			m.inFlight[name] = fs
-		}
-
-		return m, tea.Batch(cmds...)
+		// Update the in-flight progress bars
+		// case progress.FrameMsg:
+		// 	var cmds []tea.Cmd
+		// 	for name, fs := range m.inFlight {
+		// 		updated, cmd := fs.bar.Update(msg)
+		// 		fs.bar = updated
+		// 		cmds = append(cmds, cmd)
+		// 		m.inFlight[name] = fs
+		// 	}
+		//
+		// 	return m, tea.Batch(cmds...)
 	}
 	return m, nil
 }
@@ -140,9 +153,15 @@ func (m Model) View() tea.View {
 	return tea.NewView(m.headerView() + "\n" + m.barsView())
 }
 
-// TODO: Finish setting up the core view for the progres bars
 func (m Model) barsView() string {
-	return ""
+	if len(m.inFlight) == 0 && !m.done {
+		return "\nwaiting for workers to start...\n"
+	}
+
+	if m.mode == compactView {
+		return "\n" + m.tbl.View()
+	}
+	return m.tbl.View()
 }
 
 func (m Model) headerView() string {
@@ -208,5 +227,10 @@ func newTable() table.Model {
 		{Title: "Errors", Width: 8},
 	}
 
-	return table.New(table.WithColumns(columns), table.WithFocused(false))
+	tbl := table.New(table.WithColumns(columns), table.WithFocused(false), table.WithWidth(100), table.WithHeight(12))
+	styles := table.DefaultStyles()
+	styles.Header.BorderStyle(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("240")).BorderBottom(true).Bold(false)
+	tbl.SetStyles(styles)
+
+	return tbl
 }

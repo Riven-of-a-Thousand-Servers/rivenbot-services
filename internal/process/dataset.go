@@ -21,7 +21,7 @@ func NewDatasetProcessor(inner Processor[json.RawMessage], broker *pubsub.Broker
 
 func (p *DatasetProcessor) ProcessPgcr(ctx context.Context, entry dataset.Entry, source types.Source) error {
 	p.broker.Publish(uiEvents.Event{
-		Type:     uiEvents.FileProgress,
+		Type:     uiEvents.FileStarted,
 		Filename: entry.Filename,
 		RowsDone: entry.RowsDone,
 	})
@@ -35,6 +35,10 @@ func (p *DatasetProcessor) ProcessPgcr(ctx context.Context, entry dataset.Entry,
 		})
 		return err
 	}
-
+	p.broker.Publish(uiEvents.Event{
+		Type:     uiEvents.FileProgress,
+		Filename: entry.Filename,
+		RowsDone: entry.RowsDone,
+	})
 	return nil
 }

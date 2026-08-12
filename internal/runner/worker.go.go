@@ -18,6 +18,7 @@ type Worker[T any] struct {
 func NewWorker[T any](processor process.Processor[T], consumer consumer.Consumer[T]) *Worker[T] {
 	return &Worker[T]{
 		Processor: processor,
+		Consumer:  consumer,
 	}
 }
 
