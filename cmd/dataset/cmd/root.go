@@ -4,6 +4,7 @@ Copyright © 2026 Daniel Villavicencio <dvm3099@pm.me>
 package cmd
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
@@ -81,7 +82,7 @@ dataset`,
 			var processor process.Processor[dataset.Entry]
 			switch {
 			case opts.Noop:
-				processor = process.NoOpProcessor[dataset.Entry]()
+				processor = process.NewDatasetProcessor(process.NoOpProcessor[json.RawMessage](), broker)
 			default:
 				conn, err := db.Connect(ctx, opts.DbUrl)
 				if err != nil {
@@ -117,8 +118,11 @@ dataset`,
 				})
 			}
 
+			uiLog, _ := os.OpenFile("ui.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+
+			logger := slog.New(slog.NewJSONHandler(uiLog, nil))
 			programDone := make(chan struct{})
-			program := tea.NewProgram(ui.NewModel(events, len(files)))
+			program := tea.NewProgram(ui.NewModel(events, len(files), logger))
 			// This small Goroutine watches for context cancellation and passes it along to the UI
 			g.Go(func() error {
 				select {

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"log/slog"
 	"time"
 
 	uiEvents "pgcr-processing-service/internal/types/ui"
@@ -43,9 +44,10 @@ type Model struct {
 	errored    int
 	done       bool
 	quitting   bool
+	logger     *slog.Logger
 }
 
-func NewModel(ch <-chan uiEvents.Event, filesTotal int) Model {
+func NewModel(ch <-chan uiEvents.Event, filesTotal int, logger *slog.Logger) Model {
 	return Model{
 		ch:         ch,
 		inFlight:   make(map[string]*fileState),
@@ -53,6 +55,7 @@ func NewModel(ch <-chan uiEvents.Event, filesTotal int) Model {
 		mode:       compactView,
 		tbl:        newTable(),
 		startedAt:  time.Now(),
+		logger:     logger,
 	}
 }
 
@@ -78,6 +81,7 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	m.logger.Info("Msg received", "msg", msg)
 	switch msg := msg.(type) {
 	case TickMsg:
 		return m, tick()
@@ -102,12 +106,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch msg.Type {
 		case uiEvents.FileStarted:
+			m.logger.Info("Received File started event", "file", msg.Filename)
 			m.inFlight[msg.Filename] = &fileState{
 				bar:       progress.New(progress.WithDefaultBlend()),
 				rowsTotal: rowsPerFile,
 				startedAt: time.Now(),
 			}
 		case uiEvents.FileProgress:
+			m.logger.Info("Received File progress event", "file", msg.Filename, "rowsDone", msg.RowsDone)
 			if state, ok := m.inFlight[msg.Filename]; ok {
 				state.rowsDone = msg.RowsDone
 				if msg.Err != nil {
@@ -154,13 +160,10 @@ func (m Model) View() tea.View {
 }
 
 func (m Model) barsView() string {
-	if len(m.inFlight) == 0 && !m.done {
-		return "\nwaiting for workers to start...\n"
-	}
+	// if len(m.inFlight) == 0 && !m.done {
+	// 	return "\nwaiting for workers to start...\n"
+	// }
 
-	if m.mode == compactView {
-		return "\n" + m.tbl.View()
-	}
 	return m.tbl.View()
 }
 
