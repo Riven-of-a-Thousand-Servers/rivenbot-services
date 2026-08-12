@@ -18,14 +18,14 @@ import (
 const maxSize = 1024 * 1024 * 20 // 20 MBs
 
 type DatasetConsumer struct {
-	Broker    pubsub.Broker[uiEvents.Event]
 	FileIndex FileIndex
+	broker    *pubsub.Broker[uiEvents.Event]
 	once      sync.Once
 	ch        chan Delivery[dataset.Entry]
 }
 
 func NewDatasetConsumer(idx FileIndex, broker *pubsub.Broker[uiEvents.Event]) *DatasetConsumer {
-	return &DatasetConsumer{FileIndex: idx}
+	return &DatasetConsumer{FileIndex: idx, broker: broker}
 }
 
 func (c *DatasetConsumer) Consume(ctx context.Context) (<-chan Delivery[dataset.Entry], error) {
@@ -63,7 +63,7 @@ func (c *DatasetConsumer) Start(ctx context.Context) error {
 
 		entry.Started = true
 
-		c.Broker.Publish(uiEvents.Event{
+		c.broker.Publish(uiEvents.Event{
 			Type:     uiEvents.FileStarted,
 			RowsDone: 0,
 			Filename: file.Name(),
@@ -96,7 +96,7 @@ func (c *DatasetConsumer) Start(ctx context.Context) error {
 					},
 				}
 
-				c.Broker.Publish(uiEvents.Event{
+				c.broker.Publish(uiEvents.Event{
 					Type:     uiEvents.FileProgress,
 					RowsDone: count,
 					Filename: file.Name(),

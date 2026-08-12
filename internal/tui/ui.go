@@ -13,7 +13,10 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-const rowsPerFile = 10_000_000
+const (
+	rowsPerFile  = 10_000_000
+	renderPeriod = 500 * time.Millisecond
+)
 
 type viewMode int
 
@@ -22,7 +25,22 @@ const (
 	detailedView
 )
 
-type TickMsg time.Time
+type (
+	TickMsg       time.Time
+	RenderTickMsg time.Time
+)
+
+func renderTick() tea.Cmd {
+	return tea.Tick(renderPeriod, func(t time.Time) tea.Msg {
+		return RenderTickMsg{}
+	})
+}
+
+func tick() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		return TickMsg(t)
+	})
+}
 
 type fileState struct {
 	bar       progress.Model
@@ -42,6 +60,7 @@ type Model struct {
 	filesTotal int
 	filesDone  int
 	errored    int
+	dirty      bool
 	done       bool
 	quitting   bool
 	logger     *slog.Logger
@@ -59,12 +78,6 @@ func NewModel(ch <-chan uiEvents.Event, filesTotal int, logger *slog.Logger) Mod
 	}
 }
 
-func tick() tea.Cmd {
-	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
-		return TickMsg(t)
-	})
-}
-
 func WaitForEvent[T any](ch <-chan T) tea.Cmd {
 	return func() tea.Msg {
 		e, ok := <-ch
@@ -77,12 +90,19 @@ func WaitForEvent[T any](ch <-chan T) tea.Cmd {
 
 // Start listening for broker events
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(WaitForEvent(m.ch), tick())
+	return tea.Batch(WaitForEvent(m.ch), tick(), renderTick())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.logger.Info("Msg received", "msg", msg)
 	switch msg := msg.(type) {
+	case RenderTickMsg:
+		if m.dirty {
+			m.tbl.SetRows(m.tableRows())
+			m.dirty = false
+		}
+
+		return m, renderTick()
 	case TickMsg:
 		return m, tick()
 	case tea.KeyPressMsg:
@@ -101,9 +121,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Broker events related to uiEvents events
 	case uiEvents.Event:
-		var cmds []tea.Cmd
-		cmds = append(cmds, WaitForEvent(m.ch))
-
 		switch msg.Type {
 		case uiEvents.FileStarted:
 			m.logger.Info("Received File started event", "file", msg.Filename)
@@ -119,12 +136,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if msg.Err != nil {
 					state.errCount++
 				}
-				pct := 0.0
-				if state.rowsTotal > 0 {
-					pct = float64(state.rowsDone) / float64(state.rowsTotal)
-				}
-
-				cmds = append(cmds, state.bar.SetPercent(pct))
 			}
 		case uiEvents.FileCompleted:
 			// delete(m.inFlight, msg.Filename)
@@ -133,9 +144,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.errored++
 			}
 		}
-
-		m.tbl.SetRows(m.tableRows())
-		return m, tea.Batch(cmds...)
 
 		// Update the in-flight progress bars
 		// case progress.FrameMsg:
@@ -148,14 +156,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// 	}
 		//
 		// 	return m, tea.Batch(cmds...)
+
+		m.dirty = true
+		return m, WaitForEvent(m.ch)
 	}
+
 	return m, nil
 }
 
 func (m Model) View() tea.View {
-	if m.quitting {
-		return tea.NewView("")
-	}
 	return tea.NewView(m.headerView() + "\n" + m.barsView())
 }
 
@@ -180,7 +189,7 @@ func (m Model) headerView() string {
 		totalRowsDone += int64(fs.rowsDone)
 	}
 
-	completedRows := int64(m.filesDone) + int64(rowsPerFile)
+	completedRows := int64(m.filesDone) * int64(rowsPerFile)
 	rate := float64(completedRows+totalRowsDone) / max(elapsed.Seconds(), 0.0001)
 
 	return fmt.Sprintf(
