@@ -4,7 +4,9 @@ Copyright © 2026 Daniel Villavicencio <dvm3099@pm.me>
 package cmd
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
@@ -121,31 +123,21 @@ dataset`,
 			uiLog, _ := os.OpenFile("ui.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 
 			logger := slog.New(slog.NewJSONHandler(uiLog, nil))
-			programDone := make(chan struct{})
-			program := tea.NewProgram(ui.NewModel(events, len(files), logger))
-			// This small Goroutine watches for context cancellation and passes it along to the UI
-			g.Go(func() error {
-				select {
-				case <-ctx.Done():
-					program.Send(uiEvents.CtxCancelledMsg{})
-				case <-programDone:
-				}
-				return nil
-			})
+			program := tea.NewProgram(ui.NewModel(events, len(files), logger, cancel))
 
 			g.Go(func() error {
 				_, err := program.Run()
-				close(programDone)
+				// Should cancel context on UI exiting
 				return err
 			})
 
-			if err := g.Wait(); err == nil {
-				slog.Info("Successfully processed all the dataset!", "num of files", len(files))
-				return nil
-			} else {
-				slog.Info("Error during execution of dataset", "error", err)
+			err = g.Wait()
+			if err != nil && !errors.Is(err, context.Canceled) {
+				slog.Error("Error during execution of dataset", "error", err)
 				return err
 			}
+
+			return nil
 		},
 	}
 

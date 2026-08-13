@@ -34,9 +34,10 @@ push-processor: build-processor
 	docker push $(PROCESSOR_IMAGE_NAME):latest
 	docker push $(PROCESSOR_IMAGE_NAME):$(GIT_SHA)
 
-.PHONY: build-dataset
-build-dataset:
+.PHONY: dataset 
+dataset:
 	go build -o bin/dataset cmd/dataset/main.go
+	bin/dataset --noop -r "/Volumes/T7 Shield/" --goroutines 25 
 
 .PHONY: build-all
 build-all: build-processor build-crawler build-proxy

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"time"
@@ -26,7 +27,7 @@ const (
 )
 
 type (
-	TickMsg       time.Time
+	HeaderTickMsg time.Time
 	RenderTickMsg time.Time
 )
 
@@ -38,7 +39,7 @@ func renderTick() tea.Cmd {
 
 func tick() tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
-		return TickMsg(t)
+		return HeaderTickMsg(t)
 	})
 }
 
@@ -63,10 +64,11 @@ type Model struct {
 	dirty      bool
 	done       bool
 	quitting   bool
+	cancelFunc context.CancelFunc
 	logger     *slog.Logger
 }
 
-func NewModel(ch <-chan uiEvents.Event, filesTotal int, logger *slog.Logger) Model {
+func NewModel(ch <-chan uiEvents.Event, filesTotal int, logger *slog.Logger, cancelFunc context.CancelFunc) Model {
 	return Model{
 		ch:         ch,
 		inFlight:   make(map[string]*fileState),
@@ -75,6 +77,7 @@ func NewModel(ch <-chan uiEvents.Event, filesTotal int, logger *slog.Logger) Mod
 		tbl:        newTable(),
 		startedAt:  time.Now(),
 		logger:     logger,
+		cancelFunc: cancelFunc,
 	}
 }
 
@@ -101,9 +104,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.tbl.SetRows(m.tableRows())
 			m.dirty = false
 		}
-
 		return m, renderTick()
-	case TickMsg:
+	case HeaderTickMsg:
+		m.headerView()
 		return m, tick()
 	case tea.KeyPressMsg:
 		switch msg.String() {
@@ -114,8 +117,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.mode = compactView
 			}
 			return m, nil
+		case "esc":
+			if m.tbl.Focused() {
+				m.tbl.Blur()
+			} else {
+				m.tbl.Focused()
+			}
 		case "q", "ctrl+c":
 			m.quitting = true
+			m.cancelFunc()
 			return m, tea.Quit
 		}
 
@@ -165,21 +175,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() tea.View {
-	return tea.NewView(m.headerView() + "\n" + m.barsView())
+	return tea.NewView(m.headerView() + "\n" + m.bodyView() + "\n" + m.footerView())
 }
 
-func (m Model) barsView() string {
-	// if len(m.inFlight) == 0 && !m.done {
-	// 	return "\nwaiting for workers to start...\n"
-	// }
+func (m Model) footerView() string {
+	return "\n[+] toggle detail   [q/ctrl+c] quit"
+}
 
-	return m.tbl.View()
+func (m Model) bodyView() string {
+	if len(m.inFlight) == 0 && !m.done {
+		return "\nwaiting for workers to start...\n"
+	}
+
+	return baseTableStyle.Render(m.tbl.View())
 }
 
 func (m Model) headerView() string {
-	status := "processing"
+	status := "Processing"
 	if m.done {
-		status = "done"
+		status = "Done"
 	}
 
 	elapsed := time.Since(m.startedAt).Round(time.Second)
@@ -192,10 +206,8 @@ func (m Model) headerView() string {
 	completedRows := int64(m.filesDone) * int64(rowsPerFile)
 	rate := float64(completedRows+totalRowsDone) / max(elapsed.Seconds(), 0.0001)
 
-	return fmt.Sprintf(
-		"PGCR dataset import — %s\nFiles: %d/%d   errors: %d   elapsed: %s   throughput: %.0f rows/s\n[+] toggle detail   [q] quit",
-		status, m.filesDone, m.filesTotal, m.errored, elapsed, rate,
-	)
+	return gradientTitle(fmt.Sprintf(
+		headerString, status, m.filesDone, m.filesTotal, m.errored, elapsed, rate, len(m.inFlight)))
 }
 
 func (m Model) tableRows() []table.Row {
@@ -240,9 +252,18 @@ func newTable() table.Model {
 	}
 
 	tbl := table.New(table.WithColumns(columns), table.WithFocused(false), table.WithWidth(100), table.WithHeight(12))
-	styles := table.DefaultStyles()
-	styles.Header.BorderStyle(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("240")).BorderBottom(true).Bold(false)
-	tbl.SetStyles(styles)
+	s := table.DefaultStyles()
+	s.Header.
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		BorderBottom(true).
+		Bold(false)
+	s.Selected = s.Selected.
+		Foreground(lipgloss.Color("229")).
+		Background(lipgloss.Color("57")).
+		Bold(false)
+
+	tbl.SetStyles(s)
 
 	return tbl
 }
