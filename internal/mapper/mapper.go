@@ -14,12 +14,15 @@ import (
 
 type Mapper struct {
 	// TODO: This cache definition changed, make it reflect on other ends that use the mapper
-	DestinationDefinitionCache cache.Service[manifest.Entry]
+	DestinationDefinitionCache   cache.Service[manifest.Entry]
+	InventoryItemDefinitionCache cache.Service[manifest.Entry]
 }
 
-func New(cache cache.Service[manifest.Entry]) *Mapper {
+func New(destinationDefinitionCache cache.Service[manifest.Entry],
+	inventoryItemDefinitionCache cache.Service[manifest.Entry],
+) *Mapper {
 	return &Mapper{
-		DestinationDefinitionCache: cache,
+		DestinationDefinitionCache: destinationDefinitionCache,
 	}
 }
 
@@ -76,7 +79,7 @@ func (p *Mapper) enrichPgcrInfo(report *pgcr.PostGameCarnageReport) (*pgcr.PgcrI
 		return nil, err
 	}
 
-	raidName, raidDifficulty, err := pgcr.GetRaidAndDifficulty(res.Response.DisplayProperties.Name)
+	raidName, raidDifficulty, err := pgcr.GetRaidAndDifficulty(res.DisplayProperties.Name)
 	if err != nil {
 		slog.Error("Unable to parse activity raid name and raid difficulty", "error", err)
 		return nil, err

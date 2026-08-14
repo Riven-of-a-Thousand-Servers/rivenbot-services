@@ -1,6 +1,6 @@
 package manifest
 
-type TopLevel struct {
+type CompleteManifest struct {
 	Version                    string `json:"version"`
 	WorldComponentContentPaths Paths  `json:"jsonWorldComponentContentPaths"`
 }

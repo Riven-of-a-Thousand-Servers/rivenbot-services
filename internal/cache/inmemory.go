@@ -22,13 +22,13 @@ const (
 type BungieFetcher[T any] func(context.Context, string) (T, error)
 
 type InMemoryCache[T any] struct {
-	manifestFetcher BungieFetcher[manifest.Response[manifest.TopLevel]]
+	manifestFetcher BungieFetcher[manifest.Response[manifest.CompleteManifest]]
 	entryFetcher    BungieFetcher[manifest.RawComponent[T]]
 	entries         map[string]T
 }
 
 func NewInMemoryCache[T any](
-	manifestFetcher BungieFetcher[manifest.Response[manifest.TopLevel]],
+	manifestFetcher BungieFetcher[manifest.Response[manifest.CompleteManifest]],
 	entryFetcher BungieFetcher[manifest.RawComponent[T]],
 ) *InMemoryCache[T] {
 	entries := make(map[string]T)

@@ -10,11 +10,9 @@ import (
 	"strconv"
 	"time"
 
-	"pgcr-processing-service/internal/cache"
 	"pgcr-processing-service/internal/compress"
 	"pgcr-processing-service/internal/db"
 	"pgcr-processing-service/internal/mapper"
-	"pgcr-processing-service/internal/types/manifest"
 	pgcrs "pgcr-processing-service/internal/types/pgcr"
 	types "pgcr-processing-service/internal/types/processor"
 )
@@ -27,7 +25,6 @@ type PgcrProcessor struct {
 	db      *sql.DB
 	queries *db.Queries
 	mapper  *mapper.Mapper
-	cache   cache.Service[manifest.Response[manifest.Entry]]
 }
 
 // Full Processor with RabbitMQ as an extra dependency
@@ -35,13 +32,11 @@ type PgcrProcessor struct {
 func NewPgcrProcessor(db *sql.DB,
 	queries *db.Queries,
 	mapper *mapper.Mapper,
-	cache cache.Service[manifest.Response[manifest.Entry]],
 ) *PgcrProcessor {
 	return &PgcrProcessor{
 		db:      db,
 		queries: queries,
 		mapper:  mapper,
-		cache:   cache,
 	}
 }
 
@@ -279,6 +274,7 @@ func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcrs.P
 				return err
 			}
 
+			// TODO: Make this method be done by the mapper instead of calling the cache here
 			for _, ciw := range ci.WeaponInformation {
 				// Weapons
 				strHash := strconv.FormatInt(ciw.WeaponHash, 10)

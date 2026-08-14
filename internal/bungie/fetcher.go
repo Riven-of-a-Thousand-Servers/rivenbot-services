@@ -18,8 +18,8 @@ var (
 )
 
 func ManifestFetcher[T any](client *http.Client, apiKey string, def manifest.EntityDefinition) cache.Fetcher[T] {
-	return func(ctx context.Context, key string) (T, error) {
-		var zero T
+	return func(ctx context.Context, key string) (manifest.Response[T], error) {
+		var zero manifest.Response[T]
 
 		req, err := http.NewRequest(http.MethodGet, fmt.Sprintf(manifestUrl, def.String(), key), nil)
 		if err != nil {
@@ -45,11 +45,11 @@ func ManifestFetcher[T any](client *http.Client, apiKey string, def manifest.Ent
 			return zero, err
 		}
 
-		var manifestResponse T
-		if err := json.Unmarshal(data, &manifestResponse); err != nil {
+		var response manifest.Response[T]
+		if err := json.Unmarshal(data, &response); err != nil {
 			return zero, err
 		}
 
-		return manifestResponse, nil
+		return response, nil
 	}
 }

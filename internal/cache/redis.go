@@ -7,10 +7,12 @@ import (
 	"log/slog"
 	"time"
 
+	"pgcr-processing-service/internal/types/manifest"
+
 	"github.com/redis/go-redis/v9"
 )
 
-type Fetcher[T any] func(context.Context, string) (T, error)
+type Fetcher[T any] func(context.Context, string) (manifest.Response[T], error)
 
 type Service[T any] interface {
 	Get(ctx context.Context, hash string) (T, error)
@@ -50,7 +52,7 @@ func (c *RedisService[T]) Get(ctx context.Context, key string) (T, error) {
 		if fetchErr != nil {
 			return zero, fetchErr
 		}
-		return val, nil
+		return val.Response, nil
 	}
 
 	val, err := c.fetch(ctx, key)
@@ -64,5 +66,5 @@ func (c *RedisService[T]) Get(ctx context.Context, key string) (T, error) {
 		}
 	}
 
-	return val, nil
+	return val.Response, nil
 }

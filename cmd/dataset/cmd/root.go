@@ -94,7 +94,7 @@ dataset`,
 					return err
 				}
 
-				manifestFetcher := cache.HttpFetcher[manifest.Response[manifest.TopLevel]](http.DefaultClient)
+				manifestFetcher := cache.HttpFetcher[manifest.Response[manifest.CompleteManifest]](http.DefaultClient)
 				componentFetcher := cache.HttpFetcher[manifest.RawComponent[manifest.Entry]](http.DefaultClient)
 
 				inMemCache := cache.NewInMemoryCache[manifest.Entry](manifestFetcher, componentFetcher)
