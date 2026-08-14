@@ -14,9 +14,9 @@ import (
 )
 
 func TestExtractInfo_ShouldWorkForAPIPgcr(t *testing.T) {
-	mockCache := new(mockCacheService[manifest.Response])
-	mockCache.On("Get", mock.Anything, mock.Anything, mock.Anything).
-		Return(manifest.Response{Response: manifest.Entry{DisplayProperties: manifest.DisplayProperties{Name: "Last Wish"}}}, nil)
+	mockCache := new(mockCacheService[manifest.Response[manifest.Entry]])
+	mockCache.On("Get", mock.Anything, mock.Anything).
+		Return(manifest.Response[manifest.Entry]{Response: manifest.Entry{DisplayProperties: manifest.DisplayProperties{Name: "Last Wish"}}}, nil)
 
 	pgcr := openPgcr(t, "beyond_light_pgcr.json")
 	sut := New(mockCache)
@@ -32,9 +32,9 @@ func TestExtractInfo_ShouldWorkForAPIPgcr(t *testing.T) {
 }
 
 func TestExtractInfo_ShouldWorkForDatasetPgcr(t *testing.T) {
-	mockCache := new(mockCacheService[manifest.Response])
-	mockCache.On("Get", mock.Anything, mock.Anything, mock.Anything).
-		Return(manifest.Response{Response: manifest.Entry{DisplayProperties: manifest.DisplayProperties{Name: "Last Wish"}}}, nil)
+	mockCache := new(mockCacheService[manifest.Response[manifest.Entry]])
+	mockCache.On("Get", mock.Anything, mock.Anything).
+		Return(manifest.Response[manifest.Entry]{Response: manifest.Entry{DisplayProperties: manifest.DisplayProperties{Name: "Last Wish"}}}, nil)
 
 	pgcr := openPgcr(t, "beyond_light_pgcr.json")
 	sut := New(mockCache)
@@ -68,7 +68,7 @@ type mockCacheService[T any] struct {
 	mock.Mock
 }
 
-func (m *mockCacheService[T]) Get(ctx context.Context, hash, entity string) (T, error) {
-	args := m.Called(ctx, hash, entity)
+func (m *mockCacheService[T]) Get(ctx context.Context, hash string) (T, error) {
+	args := m.Called(ctx, hash)
 	return args.Get(0).(T), args.Error(1)
 }

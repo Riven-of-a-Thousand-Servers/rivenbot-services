@@ -148,7 +148,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case uiEvents.FileCompleted:
-			// delete(m.inFlight, msg.Filename)
+			delete(m.inFlight, msg.Filename)
 			m.filesDone++
 			if msg.Err != nil {
 				m.errored++

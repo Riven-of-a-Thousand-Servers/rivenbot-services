@@ -106,6 +106,13 @@ func (c *DatasetConsumer) Start(ctx context.Context) error {
 			}
 		}
 
+		c.broker.Publish(uiEvents.Event{
+			Type:     uiEvents.FileCompleted,
+			RowsDone: 10_000_000,
+			Filename: file.Name(),
+			Elapsed:  time.Since(start),
+		})
+
 		if err := scanner.Err(); err != nil {
 			return err
 		}

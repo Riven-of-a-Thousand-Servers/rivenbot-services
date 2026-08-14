@@ -26,15 +26,16 @@ type Processor[T any] interface {
 type PgcrProcessor struct {
 	db      *sql.DB
 	queries *db.Queries
-	mapper  *mapper.PgcrMapper
-	cache   cache.Service[manifest.Response]
+	mapper  *mapper.Mapper
+	cache   cache.Service[manifest.Response[manifest.Entry]]
 }
 
 // Full Processor with RabbitMQ as an extra dependency
+// TODO: Can I remove the cache here? I think it should belong to a mapper
 func NewPgcrProcessor(db *sql.DB,
 	queries *db.Queries,
-	mapper *mapper.PgcrMapper,
-	cache cache.Service[manifest.Response],
+	mapper *mapper.Mapper,
+	cache cache.Service[manifest.Response[manifest.Entry]],
 ) *PgcrProcessor {
 	return &PgcrProcessor{
 		db:      db,

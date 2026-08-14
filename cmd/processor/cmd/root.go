@@ -93,11 +93,10 @@ func newProcessCommand() *cobra.Command {
 				})
 				defer redis.Close()
 
-				fetcher := bungie.BungieManifestFetcher[manifest.Response](http.DefaultClient, opts.ApiKey)
-				cacheService := cache.New(redis, 12*time.Hour, fetcher)
-				mapper := mapper.New(cacheService)
+				destinationCache := newDestinationDefinitionCache(opts, redis)
+				mapper := mapper.New(destinationCache)
 
-				processor = process.NewPgcrProcessor(conn, queries, mapper, cacheService)
+				processor = process.NewPgcrProcessor(conn, queries, mapper, destinationCache)
 			}
 
 			worker := runner.NewWorker(processor, rabbitmq)
@@ -116,6 +115,12 @@ func newProcessCommand() *cobra.Command {
 	flags.BoolVar(&opts.Noop, "noop", false, "Whether this processor will do something when consuming")
 
 	return rootCmd
+}
+
+func newDestinationDefinitionCache(opts processorOpts, redis *redis.Client) *cache.RedisService[manifest.Response[manifest.Entry]] {
+	fetcher := bungie.ManifestFetcher[manifest.Response[manifest.Entry]](http.DefaultClient, opts.ApiKey, manifest.DestinationDefinition)
+	destinationCache := cache.New(redis, 12*time.Hour, fetcher)
+	return destinationCache
 }
 
 func runProcessor(ctx context.Context, worker *runner.Worker[json.RawMessage], concurrency int) error {

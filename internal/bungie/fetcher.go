@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"pgcr-processing-service/internal/cache"
+	"pgcr-processing-service/internal/types/manifest"
 )
 
 var (
@@ -16,11 +17,11 @@ var (
 	apiKeyHeader = "x-api-key"
 )
 
-func BungieManifestFetcher[T any](client *http.Client, apiKey string) cache.Fetcher[T] {
-	return func(ctx context.Context, entity, key string) (T, error) {
+func ManifestFetcher[T any](client *http.Client, apiKey string, def manifest.EntityDefinition) cache.Fetcher[T] {
+	return func(ctx context.Context, key string) (T, error) {
 		var zero T
 
-		req, err := http.NewRequest(http.MethodGet, fmt.Sprintf(manifestUrl, entity, key), nil)
+		req, err := http.NewRequest(http.MethodGet, fmt.Sprintf(manifestUrl, def.String(), key), nil)
 		if err != nil {
 			return zero, err
 		}

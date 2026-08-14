@@ -12,13 +12,14 @@ import (
 	"pgcr-processing-service/internal/types/pgcr"
 )
 
-type PgcrMapper struct {
-	cache cache.Service[manifest.Response]
+type Mapper struct {
+	// TODO: This cache definition changed, make it reflect on other ends that use the mapper
+	DestinationDefinitionCache cache.Service[manifest.Entry]
 }
 
-func New(cache cache.Service[manifest.Response]) *PgcrMapper {
-	return &PgcrMapper{
-		cache: cache,
+func New(cache cache.Service[manifest.Entry]) *Mapper {
+	return &Mapper{
+		DestinationDefinitionCache: cache,
 	}
 }
 
@@ -26,7 +27,7 @@ const (
 	pstTimezone string = "America/Los_Angeles"
 )
 
-func (m *PgcrMapper) ExtractInfo(report *pgcr.PostGameCarnageReport) (*pgcr.PgcrInfo, error) {
+func (m *Mapper) ExtractInfo(report *pgcr.PostGameCarnageReport) (*pgcr.PgcrInfo, error) {
 	enriched, err := m.enrichPgcrInfo(report)
 	if err != nil {
 		return nil, err
@@ -34,7 +35,7 @@ func (m *PgcrMapper) ExtractInfo(report *pgcr.PostGameCarnageReport) (*pgcr.Pgcr
 	return enriched, nil
 }
 
-func (p *PgcrMapper) enrichPgcrInfo(report *pgcr.PostGameCarnageReport) (*pgcr.PgcrInfo, error) {
+func (p *Mapper) enrichPgcrInfo(report *pgcr.PostGameCarnageReport) (*pgcr.PgcrInfo, error) {
 	var entity pgcr.PgcrInfo
 
 	// Calculate start and end time
@@ -69,7 +70,7 @@ func (p *PgcrMapper) enrichPgcrInfo(report *pgcr.PostGameCarnageReport) (*pgcr.P
 	entity.ActivityHash = report.ActivityDetails.ActivityHash
 	activitiyHash := report.ActivityDetails.ActivityHash
 
-	res, err := p.cache.Get(context.Background(), "DestinyActivityDefinition", strconv.FormatInt(activitiyHash, 10))
+	res, err := p.DestinationDefinitionCache.Get(context.Background(), strconv.FormatInt(activitiyHash, 10))
 	if err != nil {
 		slog.Error("Unable to find activity hash in Redis", "ActivityHash", activitiyHash, "Error", err)
 		return nil, err

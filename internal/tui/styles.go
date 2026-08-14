@@ -16,7 +16,8 @@ const (
 
 func gradientTitle(text string) string {
 	runes := []rune(text)
-	colors := lipgloss.Blend1D(len(runes), lipgloss.Color("#7D56F4"), lipgloss.Color("#FF6AC1"))
+	colors := lipgloss.Blend2D(len(runes), 2, 50, lipgloss.Color("#7D56F4"), lipgloss.Color("#FF6AC1"))
+	// colors := lipgloss.Blend1D(len(runes), lipgloss.Color("#7D56F4"), lipgloss.Color("#FF6AC1"))
 
 	var b strings.Builder
 	for i, r := range runes {

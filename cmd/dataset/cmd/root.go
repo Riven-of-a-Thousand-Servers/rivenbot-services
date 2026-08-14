@@ -12,9 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
-	"pgcr-processing-service/internal/bungie"
 	"pgcr-processing-service/internal/cache"
 	"pgcr-processing-service/internal/consumer"
 	"pgcr-processing-service/internal/db"
@@ -28,7 +26,6 @@ import (
 	uiEvents "pgcr-processing-service/internal/types/ui"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/redis/go-redis/v9"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 )
@@ -97,18 +94,18 @@ dataset`,
 					return err
 				}
 
-				redis := redis.NewClient(&redis.Options{
-					Addr:     "redis:6379",
-					Password: "",
-					DB:       0,
-					Protocol: 2,
-				})
-				defer redis.Close()
+				manifestFetcher := cache.HttpFetcher[manifest.Response[manifest.TopLevel]](http.DefaultClient)
+				componentFetcher := cache.HttpFetcher[manifest.RawComponent[manifest.Entry]](http.DefaultClient)
 
-				fetcher := bungie.BungieManifestFetcher[manifest.Response](http.DefaultClient, opts.ApiKey)
-				cache := cache.New(redis, 12*time.Hour, fetcher)
-				mapper := mapper.New(cache)
-				inner := process.NewPgcrProcessor(conn, queries, mapper, cache)
+				inMemCache := cache.NewInMemoryCache[manifest.Entry](manifestFetcher, componentFetcher)
+				inMemCache.Prepopulate(ctx,
+					manifest.ActivityDefinition,
+					manifest.InventoryItemDefinition,
+					manifest.DestinationDefinition,
+				)
+
+				mapper := mapper.New(inMemCache)
+				inner := process.NewPgcrProcessor(conn, queries, mapper, inMemCache)
 
 				processor = process.NewDatasetProcessor(inner, broker)
 			}
