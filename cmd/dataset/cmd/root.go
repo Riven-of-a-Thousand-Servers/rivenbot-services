@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -94,10 +93,7 @@ dataset`,
 					return err
 				}
 
-				manifestFetcher := cache.HttpFetcher[manifest.Response[manifest.CompleteManifest]](http.DefaultClient)
-				componentFetcher := cache.HttpFetcher[manifest.RawComponent[manifest.Entry]](http.DefaultClient)
-
-				inmemoryCache := cache.NewInMemoryCache(manifestFetcher, componentFetcher)
+				inmemoryCache := cache.NewInMemoryCache[manifest.Entry]()
 				if err := inmemoryCache.Prepopulate(ctx,
 					manifest.InventoryItemDefinition,
 					manifest.ActivityDefinition,

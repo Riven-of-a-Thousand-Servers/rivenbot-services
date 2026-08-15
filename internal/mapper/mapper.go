@@ -13,7 +13,7 @@ import (
 	"pgcr-processing-service/internal/types/pgcr"
 )
 
-// Mapper uses the supplied cache to map elements of a PGCR to concrete
+// Mapper uses the supplied manifet cache to map elements of a PGCR to concrete
 // attributes from both the pgcr itself and the bungie manifest
 type Mapper struct {
 	ManifestCache cache.ManifestCache[manifest.Entry]

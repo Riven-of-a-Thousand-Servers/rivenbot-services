@@ -22,20 +22,13 @@ const (
 type BungieFetcher[T any] func(context.Context, string) (T, error)
 
 type InMemoryCache[T any] struct {
-	manifestFetcher BungieFetcher[manifest.Response[manifest.CompleteManifest]]
-	entryFetcher    BungieFetcher[manifest.RawComponent[T]]
-	entries         map[string]T
+	entries map[string]T
 }
 
-func NewInMemoryCache[T any](
-	manifestFetcher BungieFetcher[manifest.Response[manifest.CompleteManifest]],
-	entryFetcher BungieFetcher[manifest.RawComponent[T]],
-) *InMemoryCache[T] {
+func NewInMemoryCache[T any]() *InMemoryCache[T] {
 	entries := make(map[string]T)
 	return &InMemoryCache[T]{
-		entries:         entries,
-		manifestFetcher: manifestFetcher,
-		entryFetcher:    entryFetcher,
+		entries: entries,
 	}
 }
 
@@ -47,7 +40,9 @@ func (c *InMemoryCache[T]) Get(ctx context.Context, hash string, entity manifest
 // This method will populate the in-memory cache with the passed in definitions
 // from the /Destiny2/Manifest/ endpoint from Bungie.net
 func (c *InMemoryCache[T]) Prepopulate(ctx context.Context, defs ...manifest.EntityDefinition) error {
-	manifest, err := c.manifestFetcher(ctx, baseUrl+manifestPath)
+	manifestFetcher := HttpFetcher[manifest.Response[manifest.CompleteManifest]](http.DefaultClient)
+	manifestComponentFetcher := HttpFetcher[manifest.RawComponent[T]](http.DefaultClient)
+	manifest, err := manifestFetcher(ctx, baseUrl+manifestPath)
 	if err != nil {
 		return err
 	}
@@ -59,7 +54,7 @@ func (c *InMemoryCache[T]) Prepopulate(ctx context.Context, defs ...manifest.Ent
 	}
 
 	for _, path := range paths {
-		entry, err := c.entryFetcher(ctx, baseUrl+path)
+		entry, err := manifestComponentFetcher(ctx, baseUrl+path)
 		if err != nil {
 			return err
 		}
