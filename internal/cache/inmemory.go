@@ -39,7 +39,7 @@ func NewInMemoryCache[T any](
 	}
 }
 
-func (c *InMemoryCache[T]) Get(ctx context.Context, hash string) (T, error) {
+func (c *InMemoryCache[T]) Get(ctx context.Context, hash string, entity manifest.EntityDefinition) (T, error) {
 	var zero T
 	return zero, nil
 }

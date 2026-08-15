@@ -28,7 +28,6 @@ type PgcrProcessor struct {
 }
 
 // Full Processor with RabbitMQ as an extra dependency
-// TODO: Can I remove the cache here? I think it should belong to a mapper
 func NewPgcrProcessor(db *sql.DB,
 	queries *db.Queries,
 	mapper *mapper.Mapper,
@@ -61,7 +60,7 @@ func (p *PgcrProcessor) ProcessPgcr(ctx context.Context, raw json.RawMessage, so
 	}
 
 	slog.Info("Processing pgcr", "instanceId", instanceId)
-	processed, err := p.mapper.ExtractInfo(&pgcr.Response)
+	processed, err := p.mapper.ExtractInfo(ctx, &pgcr.Response)
 	if err != nil {
 		return err
 	}
@@ -266,31 +265,25 @@ func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcrs.P
 				Kda:          strconv.FormatFloat(float64(ci.Kda), 'f', -1, 64),
 				Kdr:          strconv.FormatFloat(float64(ci.Kdr), 'f', -1, 64),
 				Efficiency:   int32(ci.Efficiency),
-				SuperKills:   int32(ci.AbilityInformation.SuperKills),
-				GrenadeKills: int32(ci.AbilityInformation.GrenadeKills),
-				MeleeKills:   int32(ci.AbilityInformation.MeleeKills),
+				SuperKills:   int32(ci.AbilityInfo.SuperKills),
+				GrenadeKills: int32(ci.AbilityInfo.GrenadeKills),
+				MeleeKills:   int32(ci.AbilityInfo.MeleeKills),
 			}); err != nil {
 				slog.Error("Failed to save instance character", "instanceId", pgcr.InstanceId, "membershipId", player.MembershipID, "membershipType", player.MembershipType, "characterId", ci.CharacterId)
 				return err
 			}
 
 			// TODO: Make this method be done by the mapper instead of calling the cache here
-			for _, ciw := range ci.WeaponInformation {
+			for _, ciw := range ci.WeaponInfo {
 				// Weapons
 				strHash := strconv.FormatInt(ciw.WeaponHash, 10)
-				manifestEntity, err := p.cache.Get(ctx, "DestinyInventoryItemDefinition", strHash)
+				params, err := p.mapper.WeaponInfoToDBEntity(ctx, ciw)
 				if err != nil {
-					slog.Error("Unable to fetch manifest entity", "Hash", ciw.WeaponHash, "Error", err)
-					continue
+					slog.Info("Failed to map weapon to db entity", "hash", strHash, "error", err)
+					return err
 				}
 
-				if err := qtx.CreateWeapon(ctx, db.CreateWeaponParams{
-					WeaponHash:    ciw.WeaponHash,
-					IconUrl:       manifestEntity.Response.DisplayProperties.Icon,
-					WeaponName:    manifestEntity.Response.DisplayProperties.Name,
-					DamageType:    pgcrs.GetDamageType(manifestEntity.Response.EquippingBlock.AmmoType).String(),
-					EquipmentSlot: pgcrs.GetEquippingSlot(manifestEntity.Response.EquippingBlock.EquipmentSlotTypeHash).String(),
-				}); err != nil {
+				if err := qtx.CreateWeapon(ctx, params); err != nil {
 					slog.Error("Failed to save weapon", "weaponId", strHash)
 					return err
 				}

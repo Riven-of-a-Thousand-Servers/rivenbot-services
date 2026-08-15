@@ -92,10 +92,10 @@ func newProcessCommand() *cobra.Command {
 					Protocol: 2,
 				})
 				defer redis.Close()
+				fetcher := bungie.BungieManifestFetcher[manifest.Entry](http.DefaultClient, opts.ApiKey)
+				redisCache := cache.New(redis, 12*time.Hour, fetcher)
 
-				destinationCache := newDestinationDefinitionCache(opts, redis)
-				inventoryItemCache := newInventoryItemDefinitionCache(opts, redis)
-				mapper := mapper.New(destinationCache, inventoryItemCache)
+				mapper := mapper.New(redisCache)
 
 				processor = process.NewPgcrProcessor(conn, queries, mapper)
 			}
@@ -116,16 +116,6 @@ func newProcessCommand() *cobra.Command {
 	flags.BoolVar(&opts.Noop, "noop", false, "Whether this processor will do something when consuming")
 
 	return rootCmd
-}
-
-func newDestinationDefinitionCache(opts processorOpts, redis *redis.Client) *cache.RedisService[manifest.Entry] {
-	fetcher := bungie.ManifestFetcher[manifest.Entry](http.DefaultClient, opts.ApiKey, manifest.DestinationDefinition)
-	return cache.New(redis, 12*time.Hour, fetcher)
-}
-
-func newInventoryItemDefinitionCache(opts processorOpts, redis *redis.Client) *cache.RedisService[manifest.Entry] {
-	fetcher := bungie.ManifestFetcher[manifest.Entry](http.DefaultClient, opts.ApiKey, manifest.InventoryItemDefinition)
-	return cache.New(redis, 6*time.Hour, fetcher)
 }
 
 func runProcessor(ctx context.Context, worker *runner.Worker[json.RawMessage], concurrency int) error {

@@ -12,13 +12,13 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-type Fetcher[T any] func(context.Context, string) (manifest.Response[T], error)
+type Fetcher[T any] func(context.Context, string, manifest.EntityDefinition) (manifest.Response[T], error)
 
-type Service[T any] interface {
-	Get(ctx context.Context, hash string) (T, error)
+type ManifestCache[T any] interface {
+	Get(ctx context.Context, hash string, entity manifest.EntityDefinition) (T, error)
 }
 
-type RedisService[T any] struct {
+type RedisCache[T any] struct {
 	// The Redis client to use for fetching the cached manifest object
 	redis *redis.Client
 
@@ -31,12 +31,12 @@ type RedisService[T any] struct {
 	fetch Fetcher[T]
 }
 
-func New[T any](redis *redis.Client, ttl time.Duration, fetch Fetcher[T]) *RedisService[T] {
-	return &RedisService[T]{redis: redis, fetch: fetch, ttl: ttl}
+func New[T any](redis *redis.Client, ttl time.Duration, fetch Fetcher[T]) *RedisCache[T] {
+	return &RedisCache[T]{redis: redis, fetch: fetch, ttl: ttl}
 }
 
 // Returns a given manifest entity based on a hash
-func (c *RedisService[T]) Get(ctx context.Context, key string) (T, error) {
+func (c *RedisCache[T]) Get(ctx context.Context, key string, entity manifest.EntityDefinition) (T, error) {
 	var zero T
 
 	raw, err := c.redis.Get(ctx, key).Bytes()
@@ -48,14 +48,14 @@ func (c *RedisService[T]) Get(ctx context.Context, key string) (T, error) {
 		}
 	case errors.Is(err, redis.Nil):
 	default:
-		val, fetchErr := c.fetch(ctx, key)
+		val, fetchErr := c.fetch(ctx, key, entity)
 		if fetchErr != nil {
 			return zero, fetchErr
 		}
 		return val.Response, nil
 	}
 
-	val, err := c.fetch(ctx, key)
+	val, err := c.fetch(ctx, key, entity)
 	if err != nil {
 		return zero, err
 	}

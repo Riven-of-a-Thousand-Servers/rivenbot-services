@@ -97,15 +97,16 @@ dataset`,
 				manifestFetcher := cache.HttpFetcher[manifest.Response[manifest.CompleteManifest]](http.DefaultClient)
 				componentFetcher := cache.HttpFetcher[manifest.RawComponent[manifest.Entry]](http.DefaultClient)
 
-				inMemCache := cache.NewInMemoryCache[manifest.Entry](manifestFetcher, componentFetcher)
-				inMemCache.Prepopulate(ctx,
-					manifest.ActivityDefinition,
+				inmemoryCache := cache.NewInMemoryCache(manifestFetcher, componentFetcher)
+				if err := inmemoryCache.Prepopulate(ctx,
 					manifest.InventoryItemDefinition,
-					manifest.DestinationDefinition,
-				)
+					manifest.ActivityDefinition,
+					manifest.DestinationDefinition); err != nil {
+					return err
+				}
 
-				mapper := mapper.New(inMemCache)
-				inner := process.NewPgcrProcessor(conn, queries, mapper, inMemCache)
+				mapper := mapper.New(inmemoryCache)
+				inner := process.NewPgcrProcessor(conn, queries, mapper)
 
 				processor = process.NewDatasetProcessor(inner, broker)
 			}

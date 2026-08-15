@@ -14,14 +14,15 @@ import (
 )
 
 func TestExtractInfo_ShouldWorkForAPIPgcr(t *testing.T) {
-	mockCache := new(mockCacheService[manifest.Response[manifest.Entry]])
-	mockCache.On("Get", mock.Anything, mock.Anything).
-		Return(manifest.Response[manifest.Entry]{Response: manifest.Entry{DisplayProperties: manifest.DisplayProperties{Name: "Last Wish"}}}, nil)
+	mockCache := new(mockCacheService[manifest.Entry])
+	mockCache.On("Get", mock.Anything, mock.Anything, mock.Anything).
+		Return(manifest.Entry{DisplayProperties: manifest.DisplayProperties{Name: "Last Wish"}}, nil)
 
+	ctx := context.Background()
 	pgcr := openPgcr(t, "beyond_light_pgcr.json")
 	sut := New(mockCache)
 
-	res, err := sut.ExtractInfo(&pgcr.Response)
+	res, err := sut.ExtractInfo(ctx, &pgcr.Response)
 	if err != nil {
 		t.Fatal("Unable to extract info from API-originated pgcr")
 	}
@@ -32,14 +33,15 @@ func TestExtractInfo_ShouldWorkForAPIPgcr(t *testing.T) {
 }
 
 func TestExtractInfo_ShouldWorkForDatasetPgcr(t *testing.T) {
-	mockCache := new(mockCacheService[manifest.Response[manifest.Entry]])
+	mockCache := new(mockCacheService[manifest.Entry])
 	mockCache.On("Get", mock.Anything, mock.Anything).
-		Return(manifest.Response[manifest.Entry]{Response: manifest.Entry{DisplayProperties: manifest.DisplayProperties{Name: "Last Wish"}}}, nil)
+		Return(manifest.Entry{DisplayProperties: manifest.DisplayProperties{Name: "Last Wish"}}, nil)
 
+	ctx := context.Background()
 	pgcr := openPgcr(t, "beyond_light_pgcr.json")
 	sut := New(mockCache)
 
-	res, err := sut.ExtractInfo(&pgcr.Response)
+	res, err := sut.ExtractInfo(ctx, &pgcr.Response)
 	if err != nil {
 		t.Fatal("Unable to extract info from dataset-originated pgcr")
 	}
@@ -68,7 +70,7 @@ type mockCacheService[T any] struct {
 	mock.Mock
 }
 
-func (m *mockCacheService[T]) Get(ctx context.Context, hash string) (T, error) {
+func (m *mockCacheService[T]) Get(ctx context.Context, hash string, entity manifest.EntityDefinition) (T, error) {
 	args := m.Called(ctx, hash)
 	return args.Get(0).(T), args.Error(1)
 }

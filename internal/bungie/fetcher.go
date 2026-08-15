@@ -17,11 +17,11 @@ var (
 	apiKeyHeader = "x-api-key"
 )
 
-func ManifestFetcher[T any](client *http.Client, apiKey string, def manifest.EntityDefinition) cache.Fetcher[T] {
-	return func(ctx context.Context, key string) (manifest.Response[T], error) {
+func BungieManifestFetcher[T any](client *http.Client, apiKey string) cache.Fetcher[T] {
+	return func(ctx context.Context, key string, entity manifest.EntityDefinition) (manifest.Response[T], error) {
 		var zero manifest.Response[T]
 
-		req, err := http.NewRequest(http.MethodGet, fmt.Sprintf(manifestUrl, def.String(), key), nil)
+		req, err := http.NewRequest(http.MethodGet, fmt.Sprintf(manifestUrl, entity, key), nil)
 		if err != nil {
 			return zero, err
 		}
@@ -45,11 +45,11 @@ func ManifestFetcher[T any](client *http.Client, apiKey string, def manifest.Ent
 			return zero, err
 		}
 
-		var response manifest.Response[T]
-		if err := json.Unmarshal(data, &response); err != nil {
+		var manifestResponse manifest.Response[T]
+		if err := json.Unmarshal(data, &manifestResponse); err != nil {
 			return zero, err
 		}
 
-		return response, nil
+		return manifestResponse, nil
 	}
 }

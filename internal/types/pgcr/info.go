@@ -4,6 +4,9 @@ import (
 	"time"
 )
 
+// TODO: Do we really need this intermediate representation for PGCRs?
+// It seems to me that I just need to map to the database entities and there's
+// that
 type PgcrInfo struct {
 	StartTime      time.Time      `json:"startTime"`
 	EndTime        time.Time      `json:"endTime"`
@@ -33,20 +36,20 @@ type PlayerInfo struct {
 }
 
 type CharacterInfo struct {
-	CharacterId        int64          `json:"characterId"`
-	LightLevel         int            `json:"lightLevel"`
-	CharacterClass     CharacterClass `json:"characterClass"`
-	CharacterEmblem    int64          `json:"characterEmblem"`
-	ActivityCompleted  bool           `json:"activityCompleted"`
-	Kills              int            `json:"kills"`
-	Assists            int            `json:"assists"`
-	Deaths             int            `json:"deaths"`
-	Kda                float64        `json:"kda"`
-	Kdr                float64        `json:"kdr"`
-	Efficiency         int            `json:"efficiency"`
-	TimePlayedSeconds  int            `json:"timePlayedSeconds"`
-	WeaponInformation  []WeaponInfo   `json:"weaponInformation"`
-	AbilityInformation AbilityInfo    `json:"abilityInformation"`
+	CharacterId       int64          `json:"characterId"`
+	LightLevel        int            `json:"lightLevel"`
+	CharacterClass    CharacterClass `json:"characterClass"`
+	CharacterEmblem   int64          `json:"characterEmblem"`
+	ActivityCompleted bool           `json:"activityCompleted"`
+	Kills             int            `json:"kills"`
+	Assists           int            `json:"assists"`
+	Deaths            int            `json:"deaths"`
+	Kda               float64        `json:"kda"`
+	Kdr               float64        `json:"kdr"`
+	Efficiency        int            `json:"efficiency"`
+	TimePlayedSeconds int            `json:"timePlayedSeconds"`
+	WeaponInfo        []WeaponInfo   `json:"weaponInformation"`
+	AbilityInfo       AbilityInfo    `json:"abilityInformation"`
 }
 
 type WeaponInfo struct {

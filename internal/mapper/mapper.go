@@ -8,21 +8,20 @@ import (
 	"time"
 
 	"pgcr-processing-service/internal/cache"
+	"pgcr-processing-service/internal/db"
 	"pgcr-processing-service/internal/types/manifest"
 	"pgcr-processing-service/internal/types/pgcr"
 )
 
+// Mapper uses the supplied cache to map elements of a PGCR to concrete
+// attributes from both the pgcr itself and the bungie manifest
 type Mapper struct {
-	// TODO: This cache definition changed, make it reflect on other ends that use the mapper
-	DestinationDefinitionCache   cache.Service[manifest.Entry]
-	InventoryItemDefinitionCache cache.Service[manifest.Entry]
+	ManifestCache cache.ManifestCache[manifest.Entry]
 }
 
-func New(destinationDefinitionCache cache.Service[manifest.Entry],
-	inventoryItemDefinitionCache cache.Service[manifest.Entry],
-) *Mapper {
+func New(cache cache.ManifestCache[manifest.Entry]) *Mapper {
 	return &Mapper{
-		DestinationDefinitionCache: destinationDefinitionCache,
+		ManifestCache: cache,
 	}
 }
 
@@ -30,7 +29,26 @@ const (
 	pstTimezone string = "America/Los_Angeles"
 )
 
-func (m *Mapper) ExtractInfo(report *pgcr.PostGameCarnageReport) (*pgcr.PgcrInfo, error) {
+// Maps a pgcr.WeaponInfo struct to a db.CreateWeaponParams entity
+func (m *Mapper) WeaponInfoToDBEntity(ctx context.Context, wep pgcr.WeaponInfo) (db.CreateWeaponParams, error) {
+	var params db.CreateWeaponParams
+	manifestEntity, err := m.ManifestCache.Get(ctx, strconv.FormatInt(wep.WeaponHash, 10), manifest.InventoryItemDefinition)
+	if err != nil {
+		return params, err
+	}
+
+	params = db.CreateWeaponParams{
+		WeaponHash:    wep.WeaponHash,
+		IconUrl:       manifestEntity.DisplayProperties.Icon,
+		WeaponName:    manifestEntity.DisplayProperties.Name,
+		DamageType:    pgcr.GetDamageType(manifestEntity.EquippingBlock.AmmoType).String(),
+		EquipmentSlot: pgcr.GetEquippingSlot(manifestEntity.EquippingBlock.EquipmentSlotTypeHash).String(),
+	}
+
+	return params, nil
+}
+
+func (m *Mapper) ExtractInfo(ctx context.Context, report *pgcr.PostGameCarnageReport) (*pgcr.PgcrInfo, error) {
 	enriched, err := m.enrichPgcrInfo(report)
 	if err != nil {
 		return nil, err
@@ -73,7 +91,9 @@ func (p *Mapper) enrichPgcrInfo(report *pgcr.PostGameCarnageReport) (*pgcr.PgcrI
 	entity.ActivityHash = report.ActivityDetails.ActivityHash
 	activitiyHash := report.ActivityDetails.ActivityHash
 
-	res, err := p.DestinationDefinitionCache.Get(context.Background(), strconv.FormatInt(activitiyHash, 10))
+	res, err := p.ManifestCache.Get(context.Background(),
+		strconv.FormatInt(activitiyHash, 10),
+		manifest.ActivityDefinition)
 	if err != nil {
 		slog.Error("Unable to find activity hash in Redis", "ActivityHash", activitiyHash, "Error", err)
 		return nil, err
@@ -190,7 +210,7 @@ func processPlayers(groups map[int64][]pgcr.StatsEntry) ([]pgcr.PlayerInfo, erro
 func createPlayerCharacter(entry *pgcr.StatsEntry) (*pgcr.CharacterInfo, error) {
 	characterInfo := pgcr.CharacterInfo{
 		ActivityCompleted: entry.Values.Completed == 1.0,
-		WeaponInformation: []pgcr.WeaponInfo{}, // empty just in case the player didn't do anything in the activity
+		WeaponInfo:        []pgcr.WeaponInfo{}, // empty just in case the player didn't do anything in the activity
 	}
 
 	class := pgcr.CharacterClass(entry.Player.CharacterClass)
@@ -221,7 +241,7 @@ func createPlayerCharacter(entry *pgcr.StatsEntry) (*pgcr.CharacterInfo, error) 
 				PrecisionKills: int(weapon.Values.PrecisionKills),
 				PrecisionRatio: float64(weapon.Values.PrecisionRatio),
 			}
-			characterInfo.WeaponInformation = append(characterInfo.WeaponInformation, w)
+			characterInfo.WeaponInfo = append(characterInfo.WeaponInfo, w)
 		}
 
 		// Set ability information
@@ -230,7 +250,7 @@ func createPlayerCharacter(entry *pgcr.StatsEntry) (*pgcr.CharacterInfo, error) 
 			MeleeKills:   int(entry.Extended.Abilities.MeleeKills),
 			SuperKills:   int(entry.Extended.Abilities.SuperKills),
 		}
-		characterInfo.AbilityInformation = abilityInfo
+		characterInfo.AbilityInfo = abilityInfo
 	}
 	return &characterInfo, nil
 }
