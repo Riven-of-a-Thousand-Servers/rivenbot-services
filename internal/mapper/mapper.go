@@ -49,15 +49,9 @@ func (m *Mapper) WeaponInfoToDBEntity(ctx context.Context, wep pgcr.WeaponInfo) 
 }
 
 func (m *Mapper) ExtractInfo(ctx context.Context, report *pgcr.PostGameCarnageReport) (*pgcr.PgcrInfo, error) {
-	enriched, err := m.enrichPgcrInfo(report)
-	if err != nil {
-		return nil, err
+	entity := pgcr.PgcrInfo{
+		ActivityHash: report.ActivityDetails.ActivityHash,
 	}
-	return enriched, nil
-}
-
-func (p *Mapper) enrichPgcrInfo(report *pgcr.PostGameCarnageReport) (*pgcr.PgcrInfo, error) {
-	var entity pgcr.PgcrInfo
 
 	// Calculate start and end time
 	startTime, err := time.Parse(time.RFC3339, report.Period)
@@ -81,54 +75,33 @@ func (p *Mapper) enrichPgcrInfo(report *pgcr.PostGameCarnageReport) (*pgcr.PgcrI
 	entity.StartTime = startTime
 	entity.EndTime = endTime
 
-	instanceId, err := strconv.ParseInt(report.ActivityDetails.InstanceId, 10, 64)
+	entity.InstanceId, err = strconv.ParseInt(report.ActivityDetails.InstanceId, 10, 64)
 	if err != nil {
 		slog.Error("Unable to convert instanceIdto int64 for some reason?", "InstanceId", report.ActivityDetails.InstanceId)
 		return nil, err
 	}
 
-	entity.InstanceId = instanceId
-	entity.ActivityHash = report.ActivityDetails.ActivityHash
-	activitiyHash := report.ActivityDetails.ActivityHash
-
-	res, err := p.ManifestCache.Get(context.Background(),
-		strconv.FormatInt(activitiyHash, 10),
+	res, err := m.ManifestCache.Get(ctx,
+		strconv.FormatInt(entity.ActivityHash, 10),
 		manifest.ActivityDefinition)
 	if err != nil {
-		slog.Error("Unable to find activity hash in Redis", "ActivityHash", activitiyHash, "Error", err)
+		slog.Error("Unable to find activity hash in Redis", "instanceId", entity.InstanceId, "ActivityHash", report.ActivityDetails.ActivityHash, "Error", err)
 		return nil, err
 	}
 
-	raidName, raidDifficulty, err := pgcr.GetRaidAndDifficulty(res.DisplayProperties.Name)
+	entity.RaidName, entity.RaidDifficulty, err = pgcr.GetRaidAndDifficulty(res.DisplayProperties.Name)
 	if err != nil {
 		slog.Error("Unable to parse activity raid name and raid difficulty", "error", err)
 		return nil, err
 	}
 
-	entity.RaidName = raidName
-	entity.RaidDifficulty = raidDifficulty
-
-	groupedPlayers := make(map[int64][]pgcr.StatsEntry)
-	for _, entry := range report.Entries {
-		membershipId, err := strconv.ParseInt(entry.Player.DestinyUserInfo.MembershipId, 10, 64)
-		if err != nil {
-			slog.Error("Something went wrong when parsing membership ID to Int64", "MembershipId", entry.Player.DestinyUserInfo.MembershipId)
-			return nil, err
-		}
-		val, ok := groupedPlayers[membershipId]
-		if ok {
-			groupedPlayers[membershipId] = append(val, entry)
-		} else {
-			groupedPlayers[membershipId] = []pgcr.StatsEntry{entry}
-		}
-	}
+	groupedPlayers, err := groupPlayerByMembershipId(report)
 
 	if entity.PlayerInfo, err = processPlayers(groupedPlayers); err != nil {
 		return nil, err
 	}
 
 	flawless := true
-
 Outerloop:
 	for _, players := range groupedPlayers {
 		for _, player := range players {
@@ -141,20 +114,33 @@ Outerloop:
 
 	fresh, err := resolveFromBeginning(report, flawless)
 	if err != nil {
-		slog.Error("Failed to determine if PGCR is fresh", "InstanceId", instanceId, "Error", err)
+		slog.Error("Failed to determine if PGCR is fresh", "InstanceId", entity.InstanceId, "Error", err)
 		return nil, err
 	}
 
-	trio := len(groupedPlayers) == 3
-	duo := len(groupedPlayers) == 2
-	solo := len(groupedPlayers) == 1
-
-	entity.Trio = trio
-	entity.Duo = duo
-	entity.Solo = solo
+	entity.Trio = len(groupedPlayers) == 3
+	entity.Duo = len(groupedPlayers) == 2
+	entity.Solo = len(groupedPlayers) == 1
 	entity.Flawless = flawless
 	entity.FromBeginning = *fresh
 	return &entity, nil
+}
+
+func groupPlayerByMembershipId(report *pgcr.PostGameCarnageReport) (map[int64][]pgcr.StatsEntry, error) {
+	groupedPlayers := make(map[int64][]pgcr.StatsEntry)
+	for _, entry := range report.Entries {
+		membershipId, err := strconv.ParseInt(entry.Player.DestinyUserInfo.MembershipId, 10, 64)
+		if err != nil {
+			slog.Error("Something went wrong when parsing membership ID to Int64", "MembershipId", entry.Player.DestinyUserInfo.MembershipId)
+			return nil, err
+		}
+		if val, ok := groupedPlayers[membershipId]; ok {
+			groupedPlayers[membershipId] = append(val, entry)
+		} else {
+			groupedPlayers[membershipId] = []pgcr.StatsEntry{entry}
+		}
+	}
+	return groupedPlayers, nil
 }
 
 // Takes in a map of grouped up PGCR entries by players' membershipIds and returns an array of PlayerInformation structs

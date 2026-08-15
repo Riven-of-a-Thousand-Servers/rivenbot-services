@@ -273,7 +273,6 @@ func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcrs.P
 				return err
 			}
 
-			// TODO: Make this method be done by the mapper instead of calling the cache here
 			for _, ciw := range ci.WeaponInfo {
 				// Weapons
 				strHash := strconv.FormatInt(ciw.WeaponHash, 10)
