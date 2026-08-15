@@ -3,6 +3,7 @@ module pgcr-processing-service
 go 1.26
 
 require (
+	charm.land/bubbles/v2 v2.1.1
 	charm.land/bubbletea/v2 v2.0.7
 	github.com/pressly/goose/v3 v3.27.2
 	github.com/rabbitmq/amqp091-go v1.10.0
@@ -11,10 +12,10 @@ require (
 	github.com/stretchr/testify v1.11.1
 )
 
+require github.com/charmbracelet/colorprofile v0.4.3 // indirect
+
 require (
 	charm.land/lipgloss/v2 v2.0.4
-	github.com/charmbracelet/colorprofile v0.4.3 // indirect
-	github.com/charmbracelet/harmonica v0.2.0 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20260525132238-948f4557a654 // indirect
 	github.com/charmbracelet/x/ansi v0.11.7 // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
@@ -47,7 +48,6 @@ require (
 )
 
 require (
-	charm.land/bubbles/v2 v2.1.1
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect

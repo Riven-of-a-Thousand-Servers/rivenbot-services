@@ -37,7 +37,6 @@ push-processor: build-processor
 .PHONY: dataset 
 dataset:
 	go build -o bin/dataset cmd/dataset/main.go
-	bin/dataset --noop -r "/Volumes/T7 Shield/" --goroutines 25 
 
 .PHONY: build-all
 build-all: build-processor build-crawler build-proxy

@@ -12,16 +12,16 @@ import (
 
 type DatasetProcessor struct {
 	inner  Processor[json.RawMessage]
-	broker *pubsub.Broker[uiEvents.Event]
+	broker *pubsub.Broker[uiEvents.FileEvent]
 }
 
-func NewDatasetProcessor(inner Processor[json.RawMessage], broker *pubsub.Broker[uiEvents.Event]) *DatasetProcessor {
+func NewDatasetProcessor(inner Processor[json.RawMessage], broker *pubsub.Broker[uiEvents.FileEvent]) *DatasetProcessor {
 	return &DatasetProcessor{inner: inner, broker: broker}
 }
 
 func (p *DatasetProcessor) ProcessPgcr(ctx context.Context, entry dataset.Entry, source types.Source) error {
 	if err := p.inner.ProcessPgcr(ctx, entry.Bytes, source); err != nil {
-		p.broker.Publish(uiEvents.Event{
+		p.broker.Publish(uiEvents.FileEvent{
 			Type:     uiEvents.FileError,
 			Filename: entry.Filename,
 			RowsDone: entry.RowsDone,

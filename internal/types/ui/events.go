@@ -12,7 +12,7 @@ const (
 	FileError
 )
 
-type Event struct {
+type FileEvent struct {
 	Type     EventType
 	Filename string
 	RowsDone int
@@ -20,5 +20,20 @@ type Event struct {
 	Err      error
 }
 
-// Special message that tells the UI that the context was cancelled
-type CtxCancelledMsg struct{}
+type CacheState int
+
+// Cache warming states
+const (
+	CacheStarted CacheState = iota
+	CacheLoading
+	CacheFinished
+)
+
+// Events that describe where the cache-warming process
+// is currently at
+type CacheEvent struct {
+	Type CacheState
+	Msg  string
+	Done bool
+	Size int64
+}

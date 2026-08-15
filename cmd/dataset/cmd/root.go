@@ -58,7 +58,8 @@ dataset`,
 			}
 			defer logFile.Close()
 
-			slog.SetDefault(slog.New(slog.NewJSONHandler(logFile, nil)))
+			// Will only log errors
+			slog.SetDefault(slog.New(slog.NewJSONHandler(logFile, &slog.HandlerOptions{Level: slog.LevelError})))
 
 			// Discover all .zst files before anything
 			// This cannot fail, otherwise everything goes to shit
@@ -69,18 +70,21 @@ dataset`,
 			}
 
 			g, ctx := errgroup.WithContext(ctx)
-			broker := pubsub.NewBroker[uiEvents.Event](2048)
-			defer broker.Shutdown()
+			fileBroker := pubsub.NewBroker[uiEvents.FileEvent](2048)
+			cacheBroker := pubsub.NewBroker[uiEvents.CacheEvent](5)
+			defer fileBroker.Shutdown()
+			defer cacheBroker.Shutdown()
 
-			consumer := consumer.NewDatasetConsumer(files, broker)
+			consumer := consumer.NewDatasetConsumer(files, fileBroker)
 
-			events, unsub := broker.Subscribe()
+			fileEvents, unsub := fileBroker.Subscribe()
+			cacheEvents, unsub := cacheBroker.Subscribe()
 			defer unsub()
 
 			var processor process.Processor[dataset.Entry]
 			switch {
 			case opts.Noop:
-				processor = process.NewDatasetProcessor(process.NoOpProcessor[json.RawMessage](), broker)
+				processor = process.NewDatasetProcessor(process.NoOpProcessor[json.RawMessage](), fileBroker)
 			default:
 				conn, err := db.Connect(ctx, opts.DbUrl)
 				if err != nil {
@@ -93,18 +97,19 @@ dataset`,
 					return err
 				}
 
-				inmemoryCache := cache.NewInMemoryCache[manifest.Entry]()
-				if err := inmemoryCache.Prepopulate(ctx,
-					manifest.InventoryItemDefinition,
-					manifest.ActivityDefinition,
-					manifest.DestinationDefinition); err != nil {
-					return err
-				}
+				inmemoryCache := cache.NewInMemoryCache[manifest.Entry](cacheBroker)
+				g.Go(func() error {
+					return inmemoryCache.Prepopulate(ctx,
+						opts.ApiKey,
+						manifest.InventoryItemDefinition,
+						manifest.ActivityDefinition,
+						manifest.DestinationDefinition)
+				})
 
 				mapper := mapper.New(inmemoryCache)
 				inner := process.NewPgcrProcessor(conn, queries, mapper)
 
-				processor = process.NewDatasetProcessor(inner, broker)
+				processor = process.NewDatasetProcessor(inner, fileBroker)
 			}
 
 			worker := runner.NewWorker(processor, consumer)
@@ -117,7 +122,7 @@ dataset`,
 			uiLog, _ := os.OpenFile("ui.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 
 			logger := slog.New(slog.NewJSONHandler(uiLog, nil))
-			program := tea.NewProgram(ui.NewModel(events, len(files), logger, cancel))
+			program := tea.NewProgram(ui.NewModel(fileEvents, cacheEvents, len(files), logger, cancel), tea.WithContext(ctx))
 
 			g.Go(func() error {
 				_, err := program.Run()
@@ -130,7 +135,6 @@ dataset`,
 				slog.Error("Error during execution of dataset", "error", err)
 				return err
 			}
-
 			return nil
 		},
 	}

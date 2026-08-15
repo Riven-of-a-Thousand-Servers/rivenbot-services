@@ -8,7 +8,7 @@ import (
 
 	uiEvents "pgcr-processing-service/internal/types/ui"
 
-	"charm.land/bubbles/v2/progress"
+	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -19,11 +19,12 @@ const (
 	renderPeriod = 500 * time.Millisecond
 )
 
-type viewMode int
+type uiState int
 
 const (
-	compactView viewMode = iota
-	detailedView
+	DatabaseLoading uiState = iota + 1
+	CacheWarming
+	DatasetProcessing
 )
 
 type (
@@ -37,14 +38,13 @@ func renderTick() tea.Cmd {
 	})
 }
 
-func tick() tea.Cmd {
+func headerTick() tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
 		return HeaderTickMsg(t)
 	})
 }
 
 type fileState struct {
-	bar       progress.Model
 	rowsDone  int
 	rowsTotal int
 	startedAt time.Time
@@ -52,9 +52,11 @@ type fileState struct {
 }
 
 type Model struct {
-	ch <-chan uiEvents.Event
+	f <-chan uiEvents.FileEvent
+	c <-chan uiEvents.CacheEvent
 
-	mode       viewMode
+	state      uiState
+	spinner    spinner.Model
 	tbl        table.Model
 	inFlight   map[string]*fileState
 	startedAt  time.Time
@@ -68,12 +70,13 @@ type Model struct {
 	logger     *slog.Logger
 }
 
-func NewModel(ch <-chan uiEvents.Event, filesTotal int, logger *slog.Logger, cancelFunc context.CancelFunc) Model {
+func NewModel(f <-chan uiEvents.FileEvent, c <-chan uiEvents.CacheEvent, filesTotal int, logger *slog.Logger, cancelFunc context.CancelFunc) Model {
+	s := spinner.New(spinner.WithSpinner(spinner.Dot), spinner.WithStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("205"))))
 	return Model{
-		ch:         ch,
+		f:          f,
+		spinner:    s,
 		inFlight:   make(map[string]*fileState),
 		filesTotal: filesTotal,
-		mode:       compactView,
 		tbl:        newTable(),
 		startedAt:  time.Now(),
 		logger:     logger,
@@ -93,7 +96,7 @@ func WaitForEvent[T any](ch <-chan T) tea.Cmd {
 
 // Start listening for broker events
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(WaitForEvent(m.ch), tick(), renderTick())
+	return tea.Batch(WaitForEvent(m.f), headerTick(), renderTick())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -107,16 +110,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, renderTick()
 	case HeaderTickMsg:
 		m.headerView()
-		return m, tick()
+		return m, headerTick()
 	case tea.KeyPressMsg:
 		switch msg.String() {
-		case "+":
-			if m.mode == compactView {
-				m.mode = detailedView
-			} else {
-				m.mode = compactView
-			}
-			return m, nil
 		case "esc":
 			if m.tbl.Focused() {
 				m.tbl.Blur()
@@ -129,13 +125,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
+		// Cache warming event
+	case uiEvents.CacheEvent:
+		switch msg.Type {
+		case uiEvents.CacheStarted:
+		case uiEvents.CacheLoading:
+		case uiEvents.CacheFinished:
+		}
+
+		return m, tea.Batch(m.spinner.Tick, WaitForEvent(m.f))
+
 	// Broker events related to uiEvents events
-	case uiEvents.Event:
+	case uiEvents.FileEvent:
 		switch msg.Type {
 		case uiEvents.FileStarted:
 			m.logger.Info("Received File started event", "file", msg.Filename)
 			m.inFlight[msg.Filename] = &fileState{
-				bar:       progress.New(progress.WithDefaultBlend()),
 				rowsTotal: rowsPerFile,
 				startedAt: time.Now(),
 			}
@@ -154,32 +159,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.errored++
 			}
 		}
-
-		// Update the in-flight progress bars
-		// case progress.FrameMsg:
-		// 	var cmds []tea.Cmd
-		// 	for name, fs := range m.inFlight {
-		// 		updated, cmd := fs.bar.Update(msg)
-		// 		fs.bar = updated
-		// 		cmds = append(cmds, cmd)
-		// 		m.inFlight[name] = fs
-		// 	}
-		//
-		// 	return m, tea.Batch(cmds...)
-
 		m.dirty = true
-		return m, WaitForEvent(m.ch)
+		return m, WaitForEvent(m.f)
 	}
 
 	return m, nil
 }
 
 func (m Model) View() tea.View {
-	return tea.NewView(m.headerView() + "\n" + m.bodyView() + "\n" + m.footerView())
+	switch m.state {
+	case DatabaseLoading:
+		body := m.spinner.View() + " Initializing database connection"
+		return tea.NewView(body)
+	case CacheWarming:
+	case DatasetProcessing:
+		return tea.NewView(m.headerView() + "\n" + m.bodyView() + "\n" + m.footerView())
+	default:
+	}
+	return tea.NewView("Unknown state for the dataset process. Exiting.")
 }
 
 func (m Model) footerView() string {
-	return "\n[+] toggle detail   [q/ctrl+c] quit"
+	return "\n[q/ctrl+c] quit"
 }
 
 func (m Model) bodyView() string {
@@ -204,7 +205,7 @@ func (m Model) headerView() string {
 	}
 
 	completedRows := int64(m.filesDone) * int64(rowsPerFile)
-	rate := float64(completedRows+totalRowsDone) / max(elapsed.Seconds(), 0.0001)
+	rate := float64(completedRows+totalRowsDone) / max(elapsed.Seconds(), 0.1)
 
 	return gradientTitle(fmt.Sprintf(
 		headerString, status, m.filesDone, m.filesTotal, m.errored, elapsed, rate, len(m.inFlight)))

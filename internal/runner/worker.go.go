@@ -37,24 +37,27 @@ func (w *Worker[T]) Begin(ctx context.Context) error {
 			if !ok {
 				return nil
 			}
-			w.Process(ctx, delivery)
+			if err := w.Process(ctx, delivery); err != nil {
+				return err
+			}
 		}
 	}
 }
 
-func (w *Worker[T]) Process(ctx context.Context, delivery consumer.Delivery[T]) {
+func (w *Worker[T]) Process(ctx context.Context, delivery consumer.Delivery[T]) error {
 	source, err := delivery.GetSource()
 	if err != nil {
-		slog.Warn("Unable to extract PGCR source from headers", "error", err)
+		slog.Error("Unable to extract PGCR source from headers", "error", err)
 		delivery.Nack(false)
-		return
+		return err
 	}
 
 	if err := w.Processor.ProcessPgcr(ctx, delivery.Payload, source); err != nil {
-		slog.Warn("Error processing pgcr", "error", err)
+		slog.Error("Error processing pgcr", "error", err)
 		delivery.Nack(false)
-		return
+		return err
 	}
 
 	delivery.Ack()
+	return nil
 }
