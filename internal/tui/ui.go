@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	uiEvents "pgcr-processing-service/internal/types/ui"
+	events "pgcr-processing-service/internal/types/ui"
 
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/table"
@@ -52,8 +52,9 @@ type fileState struct {
 }
 
 type Model struct {
-	f <-chan uiEvents.FileEvent
-	c <-chan uiEvents.CacheEvent
+	consumerEvents <-chan events.FileEvent
+	cacheEvents    <-chan events.CacheEvent
+	workerEvents   <-chan events.FileEvent
 
 	// Switches from Database loading, cache warming, and actual processing
 	state uiState
@@ -75,19 +76,26 @@ type Model struct {
 	logger     *slog.Logger
 }
 
-func NewModel(files <-chan uiEvents.FileEvent, cache <-chan uiEvents.CacheEvent, filesTotal int, logger *slog.Logger, cancelFunc context.CancelFunc) Model {
+func NewModel(
+	files <-chan events.FileEvent,
+	cache <-chan events.CacheEvent,
+	worker <-chan events.FileEvent,
+	filesTotal int,
+	logger *slog.Logger,
+	cancelFunc context.CancelFunc,
+) Model {
 	s := spinner.New(spinner.WithSpinner(spinner.Dot), spinner.WithStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("205"))))
 	return Model{
-		f:          files,
-		c:          cache,
-		spinner:    s,
-		state:      cacheWarming,
-		inFlight:   make(map[string]*fileState),
-		filesTotal: filesTotal,
-		tbl:        newTable(),
-		startedAt:  time.Now(),
-		logger:     logger,
-		cancelFunc: cancelFunc,
+		consumerEvents: files,
+		cacheEvents:    cache,
+		spinner:        s,
+		state:          cacheWarming,
+		inFlight:       make(map[string]*fileState),
+		filesTotal:     filesTotal,
+		tbl:            newTable(),
+		startedAt:      time.Now(),
+		logger:         logger,
+		cancelFunc:     cancelFunc,
 	}
 }
 
@@ -103,7 +111,7 @@ func WaitForEvent[T any](ch <-chan T) tea.Cmd {
 
 // Start listening for broker events
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(WaitForEvent(m.c), m.spinner.Tick)
+	return tea.Batch(WaitForEvent(m.cacheEvents), m.spinner.Tick)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -135,36 +143,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
-		return m, tea.Batch(cmd, WaitForEvent(m.c))
+		return m, tea.Batch(cmd, WaitForEvent(m.cacheEvents))
 
 		// Cache warming events
-	case uiEvents.CacheEvent:
+	case events.CacheEvent:
 		switch msg.Type {
-		case uiEvents.CacheStarted:
+		case events.CacheStarted:
 			m.cacheStageMsg = "Initializing cache..."
 			m.state = cacheWarming
-			return m, WaitForEvent(m.c)
-		case uiEvents.CacheLoading:
+			return m, WaitForEvent(m.cacheEvents)
+		case events.CacheLoading:
 			m.cacheStageMsg = fmt.Sprintf("Fetching %s", msg.CurrentDefinition.String())
-			return m, WaitForEvent(m.c)
-		case uiEvents.CacheFinished:
+			return m, WaitForEvent(m.cacheEvents)
+		case events.CacheFinished:
 			// Cache warming finished, now moving to datasetProcessing
-			var cmds []tea.Cmd = []tea.Cmd{WaitForEvent(m.f), headerTick(), renderTick()}
+			var cmds []tea.Cmd = []tea.Cmd{WaitForEvent(m.consumerEvents), headerTick(), renderTick()}
 			m.cacheStageMsg = fmt.Sprintf("Finished warming up the cache with %d entries", msg.Size)
 			m.state = datasetProcessing
 			return m, tea.Batch(cmds...)
 		}
 
 	// Broker events related to uiEvents events
-	case uiEvents.FileEvent:
+	case events.FileEvent:
 		switch msg.Type {
-		case uiEvents.FileStarted:
+		case events.FileStarted:
 			m.logger.Info("Received File started event", "file", msg.Filename)
 			m.inFlight[msg.Filename] = &fileState{
 				rowsTotal: rowsPerFile,
 				startedAt: time.Now(),
 			}
-		case uiEvents.FileProgress:
+		case events.FileProgress:
 			m.logger.Info("Received File progress event", "file", msg.Filename, "rowsDone", msg.RowsDone)
 			if state, ok := m.inFlight[msg.Filename]; ok {
 				state.rowsDone = msg.RowsDone
@@ -172,7 +180,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					state.errCount++
 				}
 			}
-		case uiEvents.FileCompleted:
+		case events.FileCompleted:
 			delete(m.inFlight, msg.Filename)
 			m.filesDone++
 			if msg.Err != nil {
@@ -180,7 +188,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.dirty = true
-		return m, WaitForEvent(m.f)
+		return m, WaitForEvent(m.consumerEvents)
 	}
 
 	return m, nil

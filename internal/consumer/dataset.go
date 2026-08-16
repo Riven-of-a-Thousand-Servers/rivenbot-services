@@ -10,7 +10,7 @@ import (
 
 	"pgcr-processing-service/internal/pubsub"
 	"pgcr-processing-service/internal/types/dataset"
-	uiEvents "pgcr-processing-service/internal/types/ui"
+	events "pgcr-processing-service/internal/types/ui"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -18,14 +18,17 @@ import (
 const maxSize = 1024 * 1024 * 20 // 20 MBs
 
 type DatasetConsumer struct {
+	*pubsub.Broker[events.FileEvent]
 	FileIndex FileIndex
-	broker    *pubsub.Broker[uiEvents.FileEvent]
 	once      sync.Once
 	ch        chan Delivery[dataset.Entry]
 }
 
-func NewDatasetConsumer(idx FileIndex, broker *pubsub.Broker[uiEvents.FileEvent]) *DatasetConsumer {
-	return &DatasetConsumer{FileIndex: idx, broker: broker}
+func NewDatasetConsumer(idx FileIndex, brokerSize int) *DatasetConsumer {
+	return &DatasetConsumer{
+		FileIndex: idx,
+		Broker:    pubsub.NewBroker[events.FileEvent](brokerSize),
+	}
 }
 
 func (c *DatasetConsumer) Consume(ctx context.Context) (<-chan Delivery[dataset.Entry], error) {
@@ -63,8 +66,8 @@ func (c *DatasetConsumer) Start(ctx context.Context) error {
 
 		entry.Started = true
 
-		c.broker.Publish(uiEvents.FileEvent{
-			Type:     uiEvents.FileStarted,
+		c.Publish(events.FileEvent{
+			Type:     events.FileStarted,
 			RowsDone: 0,
 			Filename: file.Name(),
 			Elapsed:  time.Since(start),
@@ -96,8 +99,8 @@ func (c *DatasetConsumer) Start(ctx context.Context) error {
 					},
 				}
 
-				c.broker.Publish(uiEvents.FileEvent{
-					Type:     uiEvents.FileProgress,
+				c.Publish(events.FileEvent{
+					Type:     events.FileProgress,
 					RowsDone: count,
 					Filename: file.Name(),
 					Elapsed:  time.Since(start),
@@ -106,8 +109,8 @@ func (c *DatasetConsumer) Start(ctx context.Context) error {
 			}
 		}
 
-		c.broker.Publish(uiEvents.FileEvent{
-			Type:     uiEvents.FileCompleted,
+		c.Publish(events.FileEvent{
+			Type:     events.FileCompleted,
 			RowsDone: 10_000_000,
 			Filename: file.Name(),
 			Elapsed:  time.Since(start),

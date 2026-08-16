@@ -28,14 +28,15 @@ type BungieFetcher[T any] func(context.Context, string) (T, error)
 
 type InMemoryCache[T any] struct {
 	entries map[string]T
-	broker  *pubsub.Broker[ui.CacheEvent]
+	*pubsub.Broker[ui.CacheEvent]
 }
 
-func NewInMemoryCache[T any](broker *pubsub.Broker[ui.CacheEvent]) *InMemoryCache[T] {
+// Creates an In-memory cache with an internal broker with buffer size specified
+func NewInMemoryCache[T any](size int) *InMemoryCache[T] {
 	entries := make(map[string]T)
 	return &InMemoryCache[T]{
 		entries: entries,
-		broker:  broker,
+		Broker:  pubsub.NewBroker[ui.CacheEvent](size),
 	}
 }
 
@@ -47,7 +48,7 @@ func (c *InMemoryCache[T]) Get(ctx context.Context, hash string, entity manifest
 // This method will populate the in-memory cache with the passed in definitions
 // from the /Destiny2/Manifest/ endpoint from Bungie.net
 func (c *InMemoryCache[T]) Prepopulate(ctx context.Context, apiKey string, defs ...manifest.EntityDefinition) error {
-	c.broker.Publish(ui.CacheEvent{
+	c.Publish(ui.CacheEvent{
 		Type: ui.CacheStarted,
 	})
 
@@ -62,7 +63,7 @@ func (c *InMemoryCache[T]) Prepopulate(ctx context.Context, apiKey string, defs 
 	for _, def := range defs {
 		path := manifest.Response.WorldComponentContentPaths.English[def.String()]
 
-		c.broker.Publish(ui.CacheEvent{
+		c.Publish(ui.CacheEvent{
 			Type:              ui.CacheLoading,
 			CurrentDefinition: def,
 		})
@@ -75,7 +76,7 @@ func (c *InMemoryCache[T]) Prepopulate(ctx context.Context, apiKey string, defs 
 		maps.Copy(c.entries, entry)
 	}
 
-	c.broker.Publish(ui.CacheEvent{
+	c.Publish(ui.CacheEvent{
 		Type: ui.CacheFinished,
 		Size: len(c.entries),
 	})

@@ -17,12 +17,9 @@ import (
 	"pgcr-processing-service/internal/db"
 	"pgcr-processing-service/internal/mapper"
 	"pgcr-processing-service/internal/process"
-	"pgcr-processing-service/internal/pubsub"
 	"pgcr-processing-service/internal/runner"
 	ui "pgcr-processing-service/internal/tui"
-	"pgcr-processing-service/internal/types/dataset"
 	"pgcr-processing-service/internal/types/manifest"
-	uiEvents "pgcr-processing-service/internal/types/ui"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
@@ -70,21 +67,28 @@ dataset`,
 			}
 
 			g, ctx := errgroup.WithContext(ctx)
-			fileBroker := pubsub.NewBroker[uiEvents.FileEvent](2048)
-			cacheBroker := pubsub.NewBroker[uiEvents.CacheEvent](10)
-			defer fileBroker.Shutdown()
-			defer cacheBroker.Shutdown()
-
-			consumer := consumer.NewDatasetConsumer(files, fileBroker)
-
-			fileEvents, unsub := fileBroker.Subscribe()
-			cacheEvents, unsub := cacheBroker.Subscribe()
+			consumer := consumer.NewDatasetConsumer(files, 2048)
+			fileEvents, unsub := consumer.Subscribe()
 			defer unsub()
 
-			var processor process.Processor[dataset.Entry]
+			inmemoryCache := cache.NewInMemoryCache[manifest.Entry](5)
+			cacheEvents, unsub := inmemoryCache.Subscribe()
+			defer unsub()
+
+			g.Go(func() error {
+				return inmemoryCache.Prepopulate(ctx,
+					opts.ApiKey,
+					manifest.InventoryItemDefinition,
+					manifest.ActivityDefinition,
+					manifest.DestinationDefinition)
+			})
+
+			mapper := mapper.New(inmemoryCache)
+
+			var processor *process.DatasetProcessor
 			switch {
 			case opts.Noop:
-				processor = process.NewDatasetProcessor(process.NoOpProcessor[json.RawMessage](), fileBroker)
+				processor = process.NewDatasetProcessor(process.NoOpProcessor[json.RawMessage]())
 			default:
 				conn, err := db.Connect(ctx, opts.DbUrl)
 				if err != nil {
@@ -97,20 +101,12 @@ dataset`,
 					return err
 				}
 
-				inmemoryCache := cache.NewInMemoryCache[manifest.Entry](cacheBroker)
-				g.Go(func() error {
-					return inmemoryCache.Prepopulate(ctx,
-						opts.ApiKey,
-						manifest.InventoryItemDefinition,
-						manifest.ActivityDefinition,
-						manifest.DestinationDefinition)
-				})
-
-				mapper := mapper.New(inmemoryCache)
 				inner := process.NewPgcrProcessor(conn, queries, mapper)
-
-				processor = process.NewDatasetProcessor(inner, fileBroker)
+				processor = process.NewDatasetProcessor(inner)
 			}
+
+			workerEvents, unsub := processor.Subscribe()
+			defer unsub()
 
 			worker := runner.NewWorker(processor, consumer)
 			for range opts.Goroutines {
@@ -122,7 +118,7 @@ dataset`,
 			uiLog, _ := os.OpenFile("ui.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 
 			logger := slog.New(slog.NewJSONHandler(uiLog, nil))
-			program := tea.NewProgram(ui.NewModel(fileEvents, cacheEvents, len(files), logger, cancel), tea.WithContext(ctx))
+			program := tea.NewProgram(ui.NewModel(fileEvents, cacheEvents, workerEvents, len(files), logger, cancel))
 
 			g.Go(func() error {
 				_, err := program.Run()
