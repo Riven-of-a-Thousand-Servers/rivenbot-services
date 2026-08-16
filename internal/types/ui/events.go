@@ -1,6 +1,10 @@
 package ui
 
-import "time"
+import (
+	"time"
+
+	"pgcr-processing-service/internal/types/manifest"
+)
 
 type EventType int
 
@@ -32,8 +36,12 @@ const (
 // Events that describe where the cache-warming process
 // is currently at
 type CacheEvent struct {
+	// Current state of the cache process
 	Type CacheState
-	Msg  string
-	Done bool
-	Size int64
+
+	// Current definition being fetched from bungie
+	CurrentDefinition manifest.EntityDefinition
+
+	// Entries in the cache
+	Size int
 }

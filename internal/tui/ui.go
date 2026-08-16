@@ -22,9 +22,9 @@ const (
 type uiState int
 
 const (
-	DatabaseLoading uiState = iota + 1
-	CacheWarming
-	DatasetProcessing
+	databaseLoading uiState = iota + 1
+	cacheWarming
+	datasetProcessing
 )
 
 type (
@@ -55,8 +55,13 @@ type Model struct {
 	f <-chan uiEvents.FileEvent
 	c <-chan uiEvents.CacheEvent
 
-	state      uiState
-	spinner    spinner.Model
+	// Switches from Database loading, cache warming, and actual processing
+	state uiState
+
+	// Cache warming state
+	spinner       spinner.Model
+	cacheStageMsg string
+
 	tbl        table.Model
 	inFlight   map[string]*fileState
 	startedAt  time.Time
@@ -70,11 +75,13 @@ type Model struct {
 	logger     *slog.Logger
 }
 
-func NewModel(f <-chan uiEvents.FileEvent, c <-chan uiEvents.CacheEvent, filesTotal int, logger *slog.Logger, cancelFunc context.CancelFunc) Model {
+func NewModel(files <-chan uiEvents.FileEvent, cache <-chan uiEvents.CacheEvent, filesTotal int, logger *slog.Logger, cancelFunc context.CancelFunc) Model {
 	s := spinner.New(spinner.WithSpinner(spinner.Dot), spinner.WithStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("205"))))
 	return Model{
-		f:          f,
+		f:          files,
+		c:          cache,
 		spinner:    s,
+		state:      cacheWarming,
 		inFlight:   make(map[string]*fileState),
 		filesTotal: filesTotal,
 		tbl:        newTable(),
@@ -96,7 +103,7 @@ func WaitForEvent[T any](ch <-chan T) tea.Cmd {
 
 // Start listening for broker events
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(WaitForEvent(m.f), headerTick(), renderTick())
+	return tea.Batch(WaitForEvent(m.c), m.spinner.Tick)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -125,15 +132,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
-		// Cache warming event
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, tea.Batch(cmd, WaitForEvent(m.c))
+
+		// Cache warming events
 	case uiEvents.CacheEvent:
 		switch msg.Type {
 		case uiEvents.CacheStarted:
+			m.cacheStageMsg = "Initializing cache..."
+			m.state = cacheWarming
+			return m, WaitForEvent(m.c)
 		case uiEvents.CacheLoading:
+			m.cacheStageMsg = fmt.Sprintf("Fetching %s", msg.CurrentDefinition.String())
+			return m, WaitForEvent(m.c)
 		case uiEvents.CacheFinished:
+			// Cache warming finished, now moving to datasetProcessing
+			var cmds []tea.Cmd = []tea.Cmd{WaitForEvent(m.f), headerTick(), renderTick()}
+			m.cacheStageMsg = fmt.Sprintf("Finished warming up the cache with %d entries", msg.Size)
+			m.state = datasetProcessing
+			return m, tea.Batch(cmds...)
 		}
-
-		return m, tea.Batch(m.spinner.Tick, WaitForEvent(m.f))
 
 	// Broker events related to uiEvents events
 	case uiEvents.FileEvent:
@@ -168,11 +188,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) View() tea.View {
 	switch m.state {
-	case DatabaseLoading:
+	case databaseLoading:
 		body := m.spinner.View() + " Initializing database connection"
 		return tea.NewView(body)
-	case CacheWarming:
-	case DatasetProcessing:
+	case cacheWarming:
+		s := "\nCache Warming Sequence\n"
+		s += fmt.Sprintf("\n%s %s", m.spinner.View(), m.cacheStageMsg)
+		return tea.NewView(s)
+	case datasetProcessing:
 		return tea.NewView(m.headerView() + "\n" + m.bodyView() + "\n" + m.footerView())
 	default:
 	}

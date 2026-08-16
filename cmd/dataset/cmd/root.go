@@ -71,7 +71,7 @@ dataset`,
 
 			g, ctx := errgroup.WithContext(ctx)
 			fileBroker := pubsub.NewBroker[uiEvents.FileEvent](2048)
-			cacheBroker := pubsub.NewBroker[uiEvents.CacheEvent](5)
+			cacheBroker := pubsub.NewBroker[uiEvents.CacheEvent](10)
 			defer fileBroker.Shutdown()
 			defer cacheBroker.Shutdown()
 

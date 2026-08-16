@@ -47,6 +47,10 @@ func (c *InMemoryCache[T]) Get(ctx context.Context, hash string, entity manifest
 // This method will populate the in-memory cache with the passed in definitions
 // from the /Destiny2/Manifest/ endpoint from Bungie.net
 func (c *InMemoryCache[T]) Prepopulate(ctx context.Context, apiKey string, defs ...manifest.EntityDefinition) error {
+	c.broker.Publish(ui.CacheEvent{
+		Type: ui.CacheStarted,
+	})
+
 	manifestFetcher := HttpFetcher[manifest.Response[manifest.CompleteManifest]](http.DefaultClient, apiKey)
 	manifestComponentFetcher := HttpFetcher[manifest.RawComponent[T]](http.DefaultClient, apiKey)
 	manifest, err := manifestFetcher(ctx, baseUrl+manifestPath)
@@ -55,12 +59,14 @@ func (c *InMemoryCache[T]) Prepopulate(ctx context.Context, apiKey string, defs 
 	}
 
 	// List of manifest paths to fetch according to what the cache needs
-	var paths []string
 	for _, def := range defs {
-		paths = append(paths, manifest.Response.WorldComponentContentPaths.English[def.String()])
-	}
+		path := manifest.Response.WorldComponentContentPaths.English[def.String()]
 
-	for _, path := range paths {
+		c.broker.Publish(ui.CacheEvent{
+			Type:              ui.CacheLoading,
+			CurrentDefinition: def,
+		})
+
 		entry, err := manifestComponentFetcher(ctx, baseUrl+path)
 		if err != nil {
 			return err
@@ -68,6 +74,11 @@ func (c *InMemoryCache[T]) Prepopulate(ctx context.Context, apiKey string, defs 
 
 		maps.Copy(c.entries, entry)
 	}
+
+	c.broker.Publish(ui.CacheEvent{
+		Type: ui.CacheFinished,
+		Size: len(c.entries),
+	})
 
 	return nil
 }
