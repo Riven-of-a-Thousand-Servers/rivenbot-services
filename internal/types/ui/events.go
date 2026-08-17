@@ -45,3 +45,11 @@ type CacheEvent struct {
 	// Entries in the cache
 	Size int
 }
+
+type DatabaseEvent int
+
+const (
+	ConnectionStarted DatabaseEvent = iota
+	PingingContext
+	ConnectionSuccesful
+)

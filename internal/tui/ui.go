@@ -76,10 +76,17 @@ type Model struct {
 	logger     *slog.Logger
 }
 
+// This approach of passing the individual channels is probably the right choice for this sequential
+// TUI where database status > cache warming > dataset processing takes place
+//
+// The alternative to this is to fan-in every channel to the tea.Send(..) method
+// so the program gets messages from the outside, however, this would make sense
+// if the TUI needs to listen for concurrent messages from several sources at the same time
 func NewModel(
 	files <-chan events.FileEvent,
 	cache <-chan events.CacheEvent,
 	worker <-chan events.FileEvent,
+	databse <-chan events.DatabaseEvent,
 	filesTotal int,
 	logger *slog.Logger,
 	cancelFunc context.CancelFunc,
