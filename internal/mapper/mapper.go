@@ -85,13 +85,13 @@ func (m *Mapper) ExtractInfo(ctx context.Context, report *pgcr.PostGameCarnageRe
 		strconv.FormatInt(entity.ActivityHash, 10),
 		manifest.ActivityDefinition)
 	if err != nil {
-		slog.Error("Unable to find activity hash in Redis", "instanceId", entity.InstanceId, "ActivityHash", report.ActivityDetails.ActivityHash, "Error", err)
+		slog.Error("Unable to find entity in cache", "instanceId", entity.InstanceId, "ActivityHash", report.ActivityDetails.ActivityHash, "Error", err)
 		return nil, err
 	}
 
 	entity.RaidName, entity.RaidDifficulty, err = pgcr.GetRaidAndDifficulty(res.DisplayProperties.Name)
 	if err != nil {
-		slog.Error("Unable to parse activity raid name and raid difficulty", "error", err)
+		slog.Error("Unable to parse activity raid name and raid difficulty", "activityHash", entity.ActivityHash, "error", err)
 		return nil, err
 	}
 

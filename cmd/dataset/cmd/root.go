@@ -44,6 +44,7 @@ func newRootCommand() *cobra.Command {
 dataset`,
 		// Uncomment the following line if your bare application
 		// has an action associated with it:
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := signal.NotifyContext(cmd.Context(), syscall.SIGTERM, syscall.SIGINT)
 			defer cancel()
@@ -73,15 +74,14 @@ dataset`,
 
 			inmemoryCache := cache.NewInMemoryCache[manifest.Entry](5)
 			cacheEvents, unsub := inmemoryCache.Subscribe()
-			defer unsub()
 
-			g.Go(func() error {
-				return inmemoryCache.Prepopulate(ctx,
-					opts.ApiKey,
-					manifest.InventoryItemDefinition,
-					manifest.ActivityDefinition,
-					manifest.DestinationDefinition)
-			})
+			if err = inmemoryCache.Prepopulate(ctx,
+				opts.ApiKey,
+				manifest.InventoryItemDefinition,
+				manifest.ActivityDefinition,
+				manifest.DestinationDefinition); err != nil {
+				return err
+			}
 
 			mapper := mapper.New(inmemoryCache)
 
@@ -115,10 +115,7 @@ dataset`,
 				})
 			}
 
-			uiLog, _ := os.OpenFile("ui.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-
-			logger := slog.New(slog.NewJSONHandler(uiLog, nil))
-			program := tea.NewProgram(ui.NewModel(fileEvents, cacheEvents, workerEvents, len(files), logger, cancel))
+			program := tea.NewProgram(ui.NewModel(fileEvents, cacheEvents, workerEvents, len(files), cancel), tea.WithContext(ctx))
 
 			g.Go(func() error {
 				_, err := program.Run()

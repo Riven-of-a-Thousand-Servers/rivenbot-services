@@ -3,7 +3,6 @@ package ui
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"time"
 
 	events "pgcr-processing-service/internal/types/ui"
@@ -73,7 +72,6 @@ type Model struct {
 	done       bool
 	quitting   bool
 	cancelFunc context.CancelFunc
-	logger     *slog.Logger
 }
 
 // This approach of passing the individual channels is probably the right choice for this sequential
@@ -87,7 +85,6 @@ func NewModel(
 	cache <-chan events.CacheEvent,
 	worker <-chan events.FileEvent,
 	filesTotal int,
-	logger *slog.Logger,
 	cancelFunc context.CancelFunc,
 ) Model {
 	s := spinner.New(spinner.WithSpinner(spinner.Dot), spinner.WithStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("205"))))
@@ -100,7 +97,6 @@ func NewModel(
 		filesTotal:     filesTotal,
 		tbl:            newTable(),
 		startedAt:      time.Now(),
-		logger:         logger,
 		cancelFunc:     cancelFunc,
 	}
 }
@@ -121,7 +117,6 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	m.logger.Info("Msg received", "msg", msg)
 	switch msg := msg.(type) {
 	case RenderTickMsg:
 		if m.dirty {
@@ -173,13 +168,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case events.FileEvent:
 		switch msg.Type {
 		case events.FileStarted:
-			m.logger.Info("Received File started event", "file", msg.Filename)
 			m.inFlight[msg.Filename] = &fileState{
 				rowsTotal: rowsPerFile,
 				startedAt: time.Now(),
 			}
 		case events.FileProgress:
-			m.logger.Info("Received File progress event", "file", msg.Filename, "rowsDone", msg.RowsDone)
 			if state, ok := m.inFlight[msg.Filename]; ok {
 				state.rowsDone = msg.RowsDone
 				if msg.Err != nil {

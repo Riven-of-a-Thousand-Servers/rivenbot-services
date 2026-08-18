@@ -42,12 +42,17 @@ func NewInMemoryCache[T any](size int) *InMemoryCache[T] {
 
 func (c *InMemoryCache[T]) Get(ctx context.Context, hash string, entity manifest.EntityDefinition) (T, error) {
 	var zero T
-	return zero, nil
+	res, ok := c.entries[hash]
+	if !ok {
+		return zero, fmt.Errorf("No cache entry found for hash %s", hash)
+	}
+	return res, nil
 }
 
 // This method will populate the in-memory cache with the passed in definitions
 // from the /Destiny2/Manifest/ endpoint from Bungie.net
 func (c *InMemoryCache[T]) Prepopulate(ctx context.Context, apiKey string, defs ...manifest.EntityDefinition) error {
+	slog.Info("Prepopulating cache")
 	c.Publish(ui.CacheEvent{
 		Type: ui.CacheStarted,
 	})
@@ -81,6 +86,7 @@ func (c *InMemoryCache[T]) Prepopulate(ctx context.Context, apiKey string, defs 
 		Size: len(c.entries),
 	})
 
+	slog.Info("Finished prepopulating cache with entries", "length", len(c.entries))
 	return nil
 }
 

@@ -12,7 +12,7 @@ type PGCRCompressor interface {
 	Compress(raw *pgcr.Response) ([]byte, error)
 }
 
-func Gzip(raw *pgcr.Response) ([]byte, error) {
+func Gzip(raw *pgcr.PostGameCarnageReport) ([]byte, error) {
 	jsonData, err := json.Marshal(raw)
 	if err != nil {
 		return nil, err

@@ -42,25 +42,38 @@ func NewPgcrProcessor(db *sql.DB,
 // This method takes in raw bytes and has no acknowledgement of RabbitMQ
 // Its the core processing logic that will be saved to the DB
 func (p *PgcrProcessor) ProcessPgcr(ctx context.Context, raw json.RawMessage, source types.Source) error {
-	var pgcr pgcrs.Response
-	err := json.Unmarshal(raw, &pgcr)
+	var pgcr pgcrs.PostGameCarnageReport
+	var response pgcrs.Response
+	var err error
+
+	switch source {
+	case types.Dataset:
+		err = json.Unmarshal(raw, &pgcr)
+	case types.Crawler:
+		err = json.Unmarshal(raw, &response)
+	}
+
 	if err != nil {
 		slog.Error("Error unmarshalling body from message", "Error", err)
 		return err
 	}
 
-	instanceId := pgcr.Response.ActivityDetails.InstanceId
+	if source == types.Crawler {
+		pgcr = response.Response
+	}
+
+	instanceId := pgcr.ActivityDetails.InstanceId
 	instanceId64, _ := strconv.ParseInt(instanceId, 10, 64)
-	mode := pgcr.Response.ActivityDetails.Mode
+	mode := pgcr.ActivityDetails.Mode
 
 	// Only process raid activity
-	if pgcr.Response.ActivityDetails.Mode != 4 {
+	if pgcr.ActivityDetails.Mode != 4 {
 		slog.Info("Pgcr is not a raid", "pgcr", instanceId, "mode", mode)
 		return nil
 	}
 
 	slog.Info("Processing pgcr", "instanceId", instanceId)
-	processed, err := p.mapper.ExtractInfo(ctx, &pgcr.Response)
+	processed, err := p.mapper.ExtractInfo(ctx, &pgcr)
 	if err != nil {
 		return err
 	}
