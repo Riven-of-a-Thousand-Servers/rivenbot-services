@@ -19,7 +19,7 @@ func TestExtractInfo_ShouldWorkForAPIPgcr(t *testing.T) {
 		Return(manifest.Entry{DisplayProperties: manifest.DisplayProperties{Name: "Last Wish"}}, nil)
 
 	ctx := context.Background()
-	pgcr := openPgcr(t, "beyond_light_pgcr.json")
+	pgcr := openPgcr[pgcr.Response](t, "beyond_light_pgcr.json")
 	sut := New(mockCache)
 
 	res, err := sut.ExtractInfo(ctx, &pgcr.Response)
@@ -38,10 +38,10 @@ func TestExtractInfo_ShouldWorkForDatasetPgcr(t *testing.T) {
 		Return(manifest.Entry{DisplayProperties: manifest.DisplayProperties{Name: "Last Wish"}}, nil)
 
 	ctx := context.Background()
-	pgcr := openPgcr(t, "beyond_light_pgcr.json")
+	pgcr := openPgcr[pgcr.PostGameCarnageReport](t, "dataset_pgcr.json")
 	sut := New(mockCache)
 
-	res, err := sut.ExtractInfo(ctx, &pgcr.Response)
+	res, err := sut.ExtractInfo(ctx, &pgcr)
 	if err != nil {
 		t.Fatal("Unable to extract info from dataset-originated pgcr")
 	}
@@ -49,21 +49,35 @@ func TestExtractInfo_ShouldWorkForDatasetPgcr(t *testing.T) {
 	if res == nil {
 		t.Fatalf("Response is nil")
 	}
+
+	if res.InstanceId != 15780000000 {
+		t.Fatalf("Marshalling did not work")
+	}
+
+	if len(res.PlayerInfo) != 2 {
+		t.Fatalf("Error, was expecting two entries but found %d", len(res.PlayerInfo))
+	}
+
+	if res.PlayerInfo[0].CharacterInfo[0].TimePlayedSeconds != 23 {
+		t.Fatalf("Expecting 23 seconds of played time, got %v", res.PlayerInfo[0].CharacterInfo[0].TimePlayedSeconds)
+	}
 }
 
-func openPgcr(t *testing.T, filename string) *pgcr.Response {
+func openPgcr[T any](t *testing.T, filename string) T {
 	t.Helper()
+
+	var zero T
 	bytes, err := os.ReadFile(filepath.Join("./testdata/", filename))
 	if err != nil {
 		t.Fatalf("Error reading file %s: %v", filename, err)
-		return nil
+		return zero
 	}
 
-	var pgcr pgcr.Response
+	var pgcr T
 	if err = json.Unmarshal(bytes, &pgcr); err != nil {
 		t.Fatalf("Error marshaling pgcr for file %s: %v", filename, err)
 	}
-	return &pgcr
+	return pgcr
 }
 
 type mockCacheService[T any] struct {

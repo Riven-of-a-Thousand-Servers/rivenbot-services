@@ -56,7 +56,7 @@ dataset`,
 			defer logFile.Close()
 
 			// Will only log errors
-			slog.SetDefault(slog.New(slog.NewJSONHandler(logFile, &slog.HandlerOptions{Level: slog.LevelError})))
+			slog.SetDefault(slog.New(slog.NewJSONHandler(logFile, &slog.HandlerOptions{Level: slog.LevelInfo.Level()})))
 
 			// Discover all .zst files before anything
 			// This cannot fail, otherwise everything goes to shit

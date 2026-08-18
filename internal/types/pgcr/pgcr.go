@@ -55,8 +55,9 @@ type StatValue float64
 func (s *StatValue) UnmarshalJSON(data []byte) error {
 	var f float64
 
-	if err := json.Unmarshal(data, &f); err != nil {
+	if err := json.Unmarshal(data, &f); err == nil {
 		*s = StatValue(f)
+		return nil
 	}
 
 	var nested struct {

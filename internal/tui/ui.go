@@ -86,7 +86,6 @@ func NewModel(
 	files <-chan events.FileEvent,
 	cache <-chan events.CacheEvent,
 	worker <-chan events.FileEvent,
-	databse <-chan events.DatabaseEvent,
 	filesTotal int,
 	logger *slog.Logger,
 	cancelFunc context.CancelFunc,
