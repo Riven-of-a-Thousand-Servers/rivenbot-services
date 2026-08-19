@@ -50,6 +50,13 @@ type fileState struct {
 	errCount  int
 }
 
+// FIX: There is a big issue now that I've figured out how to properly
+// setup the cache:
+// 1. The cache initializes first in a blocking-manner
+// 2. The program initalizes last and is not able to render the cache warming screen
+// This seems to steer this UI in the direction that I thought it would
+// which is using program.Send() to signal the different stages
+// to the tea.Program{}
 type Model struct {
 	consumerEvents <-chan events.FileEvent
 	cacheEvents    <-chan events.CacheEvent
