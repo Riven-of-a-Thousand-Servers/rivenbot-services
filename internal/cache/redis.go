@@ -14,10 +14,6 @@ import (
 
 type Fetcher[T any] func(context.Context, string, manifest.EntityDefinition) (manifest.Response[T], error)
 
-type ManifestCache[T any] interface {
-	Get(ctx context.Context, hash string, entity manifest.EntityDefinition) (T, error)
-}
-
 type RedisCache[T any] struct {
 	// The Redis client to use for fetching the cached manifest object
 	redis *redis.Client

@@ -12,7 +12,10 @@ require (
 	github.com/stretchr/testify v1.11.1
 )
 
-require github.com/charmbracelet/colorprofile v0.4.3 // indirect
+require (
+	github.com/charmbracelet/colorprofile v0.4.3 // indirect
+	github.com/google/go-cmp v0.5.9 // indirect
+)
 
 require (
 	charm.land/lipgloss/v2 v2.0.4
@@ -61,5 +64,6 @@ require (
 	golang.org/x/sync v0.21.0
 	golang.org/x/time v0.15.0
 	gopkg.in/yaml.v3 v3.0.1 // indirect
+	gotest.tools/v3 v3.5.2
 	modernc.org/sqlite v1.55.0
 )

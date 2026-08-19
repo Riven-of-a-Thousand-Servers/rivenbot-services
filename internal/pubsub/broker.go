@@ -42,6 +42,8 @@ func (b *Broker[T]) Subscribe() (ch <-chan T, unsubscribe func()) {
 	return sub, unsubscribe
 }
 
+// TODO: This implementation is actually not that good since it'll drop
+// packets if the sending channel is overwhelmed
 func (b *Broker[T]) Publish(msg T) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
