@@ -295,7 +295,9 @@ func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcrs.P
 					return err
 				}
 
-				if err := qtx.CreateWeapon(ctx, params); err != nil {
+				// Weapons should not be made as part of the whole transaction due to many
+				// raids having similar weapon setups, this makes deadlocks be a regular ocurrance
+				if err := p.queries.CreateWeapon(ctx, params); err != nil {
 					slog.Error("Failed to save weapon", "weaponId", strHash, "error", err)
 					return err
 				}

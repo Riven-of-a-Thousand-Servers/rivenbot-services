@@ -109,6 +109,12 @@ dataset`,
 				inner := process.NewPgcrProcessor(conn, queries, mapper)
 				processor = process.NewDatasetProcessor(inner)
 			}
+			// setup events
+			var eventsWg sync.WaitGroup
+			eventsCh := make(chan tea.Msg, 20_000)
+			setupEvents(ctx, &eventsWg, eventsCh, cache)
+			setupEvents(ctx, &eventsWg, eventsCh, consumer)
+			setupEvents(ctx, &eventsWg, eventsCh, processor)
 
 			if err = cache.Prepopulate(groupCtx,
 				opts.ApiKey,
@@ -120,25 +126,17 @@ dataset`,
 				return err
 			}
 
+			cleanup = append(cleanup, func() error {
+				eventsWg.Wait()
+				return nil
+			})
+
 			worker := runner.NewWorker(processor, consumer)
 			for range opts.Goroutines {
 				g.Go(func() error {
 					return worker.Begin(groupCtx)
 				})
 			}
-
-			// setup events
-			var eventsWg sync.WaitGroup
-			eventsCh := make(chan tea.Msg, 1000)
-			setupEvents(ctx, &eventsWg, eventsCh, processor)
-			setupEvents(ctx, &eventsWg, eventsCh, cache)
-			setupEvents(ctx, &eventsWg, eventsCh, consumer)
-
-			cleanup = append(cleanup, func() error {
-				eventsWg.Wait()
-				return nil
-			})
-
 			go publishEventsToTea(ctx, program, eventsCh)
 
 			err = g.Wait()
@@ -168,6 +166,7 @@ func publishEventsToTea(ctx context.Context, program *tea.Program, out <-chan te
 			slog.Debug("Context cancelled, TUI message handler is shutting down")
 			return
 		case msg, ok := <-out:
+			slog.Info("Publishing event", "msg", msg)
 			if !ok {
 				slog.Debug("TUI message channel closed")
 				return
