@@ -6,6 +6,8 @@ const (
 	ActivityDefinition EntityDefinition = iota + 1
 	DestinationDefinition
 	InventoryItemDefinition
+	DamageTypeDefinition
+	EquipmentSlotDefinition
 )
 
 func (d EntityDefinition) String() string {
@@ -16,6 +18,10 @@ func (d EntityDefinition) String() string {
 		return "DestinyDestinationDefinition"
 	case InventoryItemDefinition:
 		return "DestinyInventoryItemDefinition"
+	case DamageTypeDefinition:
+		return "DestinyDamageTypeDefinition"
+	case EquipmentSlotDefinition:
+		return "DestinyEquipmentSlotDefinition"
 	default:
 		return "unknown"
 	}
@@ -29,6 +35,10 @@ func ParseEntity(s string) (EntityDefinition, bool) {
 		return DestinationDefinition, true
 	case "DestinyInventoryItemDefinition":
 		return InventoryItemDefinition, true
+	case "DamageTypeDefinition":
+		return DamageTypeDefinition, true
+	case "DestinyEquipmentSlotDefinition":
+		return EquipmentSlotDefinition, true
 	default:
 		return 0, false
 	}

@@ -13,7 +13,7 @@ import (
 	"pgcr-processing-service/internal/types/pgcr"
 )
 
-// Mapper uses the supplied manifet cache to map elements of a PGCR to concrete
+// Mapper uses the supplied manifest cache to map elements of a PGCR to concrete
 // attributes from both the pgcr itself and the bungie manifest
 type Mapper struct {
 	ManifestCache cache.ManifestCache[manifest.Entry]
@@ -32,23 +32,33 @@ const (
 // Maps a pgcr.WeaponInfo struct to a db.CreateWeaponParams entity
 func (m *Mapper) WeaponInfoToDBEntity(ctx context.Context, wep pgcr.WeaponInfo) (db.CreateWeaponParams, error) {
 	var params db.CreateWeaponParams
-	manifestEntity, err := m.ManifestCache.Get(ctx, strconv.FormatInt(wep.WeaponHash, 10), manifest.InventoryItemDefinition)
+	itemDef, err := m.ManifestCache.Get(ctx, strconv.FormatInt(wep.WeaponHash, 10), manifest.InventoryItemDefinition)
+	if err != nil {
+		return params, err
+	}
+
+	damageTypeDef, err := m.ManifestCache.Get(ctx, strconv.FormatInt(itemDef.DefaultDamageTypeHash, 10), manifest.DamageTypeDefinition)
+	if err != nil {
+		return params, err
+	}
+
+	equipmentSlotDef, err := m.ManifestCache.Get(ctx, strconv.FormatInt(itemDef.EquippingBlock.EquipmentSlotTypeHash, 10), manifest.EquipmentSlotDefinition)
 	if err != nil {
 		return params, err
 	}
 
 	params = db.CreateWeaponParams{
 		WeaponHash:    wep.WeaponHash,
-		IconUrl:       manifestEntity.DisplayProperties.Icon,
-		WeaponName:    manifestEntity.DisplayProperties.Name,
-		DamageType:    pgcr.GetDamageType(manifestEntity.EquippingBlock.AmmoType).String(),
-		EquipmentSlot: pgcr.GetEquippingSlot(manifestEntity.EquippingBlock.EquipmentSlotTypeHash).String(),
+		IconUrl:       itemDef.DisplayProperties.Icon,
+		WeaponName:    itemDef.DisplayProperties.Name,
+		DamageType:    damageTypeDef.DisplayProperties.Name,
+		EquipmentSlot: equipmentSlotDef.DisplayProperties.Name,
 	}
 
 	return params, nil
 }
 
-func (m *Mapper) ExtractInfo(ctx context.Context, report *pgcr.PostGameCarnageReport) (*pgcr.PgcrInfo, error) {
+func (m *Mapper) PgcrToPgcrInfo(ctx context.Context, report *pgcr.PostGameCarnageReport) (*pgcr.PgcrInfo, error) {
 	entity := pgcr.PgcrInfo{
 		ActivityHash: report.ActivityDetails.ActivityHash,
 	}
@@ -75,7 +85,7 @@ func (m *Mapper) ExtractInfo(ctx context.Context, report *pgcr.PostGameCarnageRe
 	entity.StartTime = startTime
 	entity.EndTime = endTime
 
-	entity.InstanceId, err = strconv.ParseInt(report.ActivityDetails.InstanceId, 10, 64)
+	entity.InstanceId, err = strconv.ParseInt(string(report.ActivityDetails.InstanceId), 10, 64)
 	if err != nil {
 		slog.Error("Unable to convert instanceIdto int64 for some reason?", "InstanceId", report.ActivityDetails.InstanceId)
 		return nil, err

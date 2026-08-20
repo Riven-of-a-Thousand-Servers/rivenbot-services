@@ -3,6 +3,7 @@ package pgcr
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 )
 
 type Response struct {
@@ -21,13 +22,35 @@ type PostGameCarnageReport struct {
 }
 
 type ActivityEntry struct {
-	ReferenceId    int64  `json:"referenceId"`
-	ActivityHash   int64  `json:"directorActivityHash"`
-	InstanceId     string `json:"instanceId"`
-	Mode           int    `json:"mode"`
-	Modes          []int  `json:"modes"`
-	IsPrivate      bool   `json:"isPrivate"`
-	MembershipType int    `json:"membershipType"`
+	ReferenceId    int64       `json:"referenceId"`
+	ActivityHash   int64       `json:"directorActivityHash"`
+	InstanceId     StringInt64 `json:"instanceId"`
+	Mode           int         `json:"mode"`
+	Modes          []int       `json:"modes"`
+	IsPrivate      bool        `json:"isPrivate"`
+	MembershipType int         `json:"membershipType"`
+}
+
+// This custom type was made because several entries in the Asun
+// dataset have instanceIds that are classified as Strings when the
+// vast majority are int64s
+type StringInt64 string
+
+func (s *StringInt64) UnmarshalJSON(data []byte) error {
+	var str string
+	if err := json.Unmarshal(data, &str); err == nil {
+		*s = StringInt64(str)
+		return nil
+	}
+
+	var i int64
+	if err := json.Unmarshal(data, &i); err != nil {
+		return fmt.Errorf("InstanceId unrecognized shape: %v", err)
+	}
+
+	res := strconv.FormatInt(i, 10)
+	*s = StringInt64(res)
+	return nil
 }
 
 type StatsEntry struct {

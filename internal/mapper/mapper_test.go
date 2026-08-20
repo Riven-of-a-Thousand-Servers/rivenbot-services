@@ -22,7 +22,7 @@ func TestExtractInfo_ShouldWorkForAPIPgcr(t *testing.T) {
 	pgcr := openPgcr[pgcr.Response](t, "beyond_light_pgcr.json")
 	sut := New(mockCache)
 
-	res, err := sut.ExtractInfo(ctx, &pgcr.Response)
+	res, err := sut.PgcrToPgcrInfo(ctx, &pgcr.Response)
 	if err != nil {
 		t.Fatal("Unable to extract info from API-originated pgcr")
 	}
@@ -41,7 +41,7 @@ func TestExtractInfo_ShouldWorkForDatasetPgcr(t *testing.T) {
 	pgcr := openPgcr[pgcr.PostGameCarnageReport](t, "dataset_pgcr.json")
 	sut := New(mockCache)
 
-	res, err := sut.ExtractInfo(ctx, &pgcr)
+	res, err := sut.PgcrToPgcrInfo(ctx, &pgcr)
 	if err != nil {
 		t.Fatal("Unable to extract info from dataset-originated pgcr")
 	}

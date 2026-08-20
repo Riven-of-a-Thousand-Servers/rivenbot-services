@@ -63,17 +63,17 @@ func (p *PgcrProcessor) ProcessPgcr(ctx context.Context, raw json.RawMessage, so
 	}
 
 	instanceId := pgcr.ActivityDetails.InstanceId
-	instanceId64, _ := strconv.ParseInt(instanceId, 10, 64)
+	instanceId64, _ := strconv.ParseInt(string(instanceId), 10, 64)
 	mode := pgcr.ActivityDetails.Mode
 
 	// Only process raid activity
 	if pgcr.ActivityDetails.Mode != 4 {
-		slog.Info("Pgcr is not a raid", "pgcr", instanceId, "mode", mode)
+		slog.Debug("Pgcr is not a raid", "pgcr", instanceId, "mode", mode)
 		return nil
 	}
 
 	slog.Info("Processing pgcr", "instanceId", instanceId)
-	processed, err := p.mapper.ExtractInfo(ctx, &pgcr)
+	processed, err := p.mapper.PgcrToPgcrInfo(ctx, &pgcr)
 	if err != nil {
 		return err
 	}
@@ -296,7 +296,7 @@ func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcrs.P
 				}
 
 				if err := qtx.CreateWeapon(ctx, params); err != nil {
-					slog.Error("Failed to save weapon", "weaponId", strHash)
+					slog.Error("Failed to save weapon", "weaponId", strHash, "error", err)
 					return err
 				}
 

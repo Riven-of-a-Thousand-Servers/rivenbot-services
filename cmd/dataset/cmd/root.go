@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"pgcr-processing-service/internal/cache"
@@ -17,6 +18,7 @@ import (
 	"pgcr-processing-service/internal/db"
 	"pgcr-processing-service/internal/mapper"
 	"pgcr-processing-service/internal/process"
+	"pgcr-processing-service/internal/pubsub"
 	"pgcr-processing-service/internal/runner"
 	ui "pgcr-processing-service/internal/tui"
 	"pgcr-processing-service/internal/types/manifest"
@@ -46,6 +48,14 @@ dataset`,
 		// has an action associated with it:
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			type cleanupFunc func() error
+			var cleanup []cleanupFunc
+			defer func(clean []cleanupFunc) {
+				for _, c := range clean {
+					c()
+				}
+			}(cleanup)
+
 			ctx, cancel := signal.NotifyContext(cmd.Context(), syscall.SIGTERM, syscall.SIGINT)
 			defer cancel()
 
@@ -57,46 +67,41 @@ dataset`,
 			defer logFile.Close()
 
 			// Will only log errors
-			slog.SetDefault(slog.New(slog.NewJSONHandler(logFile, &slog.HandlerOptions{Level: slog.LevelInfo.Level()})))
+			slog.SetDefault(slog.New(slog.NewJSONHandler(logFile, &slog.HandlerOptions{
+				Level: slog.LevelInfo.Level(),
+			})))
 
+			g, groupCtx := errgroup.WithContext(ctx)
+
+			program := tea.NewProgram(ui.NewModel(cancel), tea.WithContext(groupCtx))
+			g.Go(func() error {
+				_, err := program.Run()
+				return err
+			})
 			// Discover all .zst files before anything
 			// This cannot fail, otherwise everything goes to shit
 			discoverer := consumer.NewDiscoverer(opts.RootDir)
-			files, err := discoverer.Discover(ctx, ".zst")
+			files, err := discoverer.Discover(groupCtx, ".zst")
 			if err != nil {
 				return err
 			}
 
-			g, ctx := errgroup.WithContext(ctx)
 			consumer := consumer.NewDatasetConsumer(files, 2048)
-			fileEvents, unsub := consumer.Subscribe()
-			defer unsub()
-
-			inmemoryCache := cache.NewInMemoryCache[manifest.Entry](5)
-			cacheEvents, unsub := inmemoryCache.Subscribe()
-
-			if err = inmemoryCache.Prepopulate(ctx,
-				opts.ApiKey,
-				manifest.InventoryItemDefinition,
-				manifest.ActivityDefinition,
-				manifest.DestinationDefinition); err != nil {
-				return err
-			}
-
-			mapper := mapper.New(inmemoryCache)
+			cache := cache.NewInMemoryCache[manifest.Entry](5)
+			mapper := mapper.New(cache)
 
 			var processor *process.DatasetProcessor
 			switch {
 			case opts.Noop:
 				processor = process.NewDatasetProcessor(process.NoOpProcessor[json.RawMessage]())
 			default:
-				conn, err := db.Connect(ctx, opts.DbUrl)
+				conn, err := db.Connect(groupCtx, opts.DbUrl)
 				if err != nil {
 					return err
 				}
 				defer conn.Close()
 
-				queries, err := db.Prepare(ctx, conn)
+				queries, err := db.Prepare(groupCtx, conn)
 				if err != nil {
 					return err
 				}
@@ -105,29 +110,43 @@ dataset`,
 				processor = process.NewDatasetProcessor(inner)
 			}
 
-			workerEvents, unsub := processor.Subscribe()
-			defer unsub()
+			if err = cache.Prepopulate(groupCtx,
+				opts.ApiKey,
+				manifest.InventoryItemDefinition,
+				manifest.ActivityDefinition,
+				manifest.DestinationDefinition,
+				manifest.EquipmentSlotDefinition,
+				manifest.DamageTypeDefinition); err != nil {
+				return err
+			}
 
 			worker := runner.NewWorker(processor, consumer)
 			for range opts.Goroutines {
 				g.Go(func() error {
-					return worker.Begin(ctx)
+					return worker.Begin(groupCtx)
 				})
 			}
 
-			program := tea.NewProgram(ui.NewModel(fileEvents, cacheEvents, workerEvents, len(files), cancel), tea.WithContext(ctx))
+			// setup events
+			var eventsWg sync.WaitGroup
+			eventsCh := make(chan tea.Msg, 1000)
+			setupEvents(ctx, &eventsWg, eventsCh, processor)
+			setupEvents(ctx, &eventsWg, eventsCh, cache)
+			setupEvents(ctx, &eventsWg, eventsCh, consumer)
 
-			g.Go(func() error {
-				_, err := program.Run()
-				// Should cancel context on UI exiting
-				return err
+			cleanup = append(cleanup, func() error {
+				eventsWg.Wait()
+				return nil
 			})
+
+			go publishEventsToTea(ctx, program, eventsCh)
 
 			err = g.Wait()
 			if err != nil && !errors.Is(err, context.Canceled) {
 				slog.Error("Error during execution of dataset", "error", err)
 				return err
 			}
+
 			return nil
 		},
 	}
@@ -140,6 +159,58 @@ dataset`,
 	flags.IntVarP(&opts.Goroutines, "goroutines", "g", 1, "Number of workers to spin up")
 
 	return cmd
+}
+
+func publishEventsToTea(ctx context.Context, program *tea.Program, out <-chan tea.Msg) {
+	for {
+		select {
+		case <-ctx.Done():
+			slog.Debug("Context cancelled, TUI message handler is shutting down")
+			return
+		case msg, ok := <-out:
+			if !ok {
+				slog.Debug("TUI message channel closed")
+				return
+			}
+
+			program.Send(msg)
+		}
+	}
+}
+
+// Setup events takes a subscriber, subscribes to it and asynchronously
+// emits the events from its chanel down to the output channel that will
+// comunicate with the tea.Program
+func setupEvents[T any](
+	ctx context.Context,
+	wg *sync.WaitGroup,
+	outCh chan<- tea.Msg,
+	subscriber pubsub.Subscriber[T],
+) {
+	wg.Go(func() {
+		subCh, _ := subscriber.Subscribe()
+		for {
+			select {
+			case e, ok := <-subCh:
+				if !ok {
+					slog.Debug("Subscription channel closed")
+					return
+				}
+
+				var msg tea.Msg = e
+				select {
+				case outCh <- msg:
+				case <-ctx.Done():
+					slog.Debug("Global context was cancelled. Returning")
+					return
+				}
+
+			case <-ctx.Done():
+				slog.Debug("Global context was cancelled. Returning")
+				return
+			}
+		}
+	})
 }
 
 // rootCmd represents the base command when called without any subcommands

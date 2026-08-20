@@ -50,18 +50,7 @@ type fileState struct {
 	errCount  int
 }
 
-// FIX: There is a big issue now that I've figured out how to properly
-// setup the cache:
-// 1. The cache initializes first in a blocking-manner
-// 2. The program initalizes last and is not able to render the cache warming screen
-// This seems to steer this UI in the direction that I thought it would
-// which is using program.Send() to signal the different stages
-// to the tea.Program{}
 type Model struct {
-	consumerEvents <-chan events.FileEvent
-	cacheEvents    <-chan events.CacheEvent
-	workerEvents   <-chan events.FileEvent
-
 	// Switches from Database loading, cache warming, and actual processing
 	state uiState
 
@@ -88,23 +77,16 @@ type Model struct {
 // so the program gets messages from the outside, however, this would make sense
 // if the TUI needs to listen for concurrent messages from several sources at the same time
 func NewModel(
-	files <-chan events.FileEvent,
-	cache <-chan events.CacheEvent,
-	worker <-chan events.FileEvent,
-	filesTotal int,
 	cancelFunc context.CancelFunc,
 ) Model {
 	s := spinner.New(spinner.WithSpinner(spinner.Dot), spinner.WithStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("205"))))
 	return Model{
-		consumerEvents: files,
-		cacheEvents:    cache,
-		spinner:        s,
-		state:          cacheWarming,
-		inFlight:       make(map[string]*fileState),
-		filesTotal:     filesTotal,
-		tbl:            newTable(),
-		startedAt:      time.Now(),
-		cancelFunc:     cancelFunc,
+		spinner:    s,
+		state:      cacheWarming,
+		inFlight:   make(map[string]*fileState),
+		tbl:        newTable(),
+		startedAt:  time.Now(),
+		cancelFunc: cancelFunc,
 	}
 }
 
@@ -120,20 +102,21 @@ func WaitForEvent[T any](ch <-chan T) tea.Cmd {
 
 // Start listening for broker events
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(WaitForEvent(m.cacheEvents), m.spinner.Tick)
+	return tea.Batch(m.spinner.Tick)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
 	switch msg := msg.(type) {
 	case RenderTickMsg:
 		if m.dirty {
 			m.tbl.SetRows(m.tableRows())
 			m.dirty = false
 		}
-		return m, renderTick()
+		cmds = append(cmds, renderTick())
 	case HeaderTickMsg:
 		m.headerView()
-		return m, headerTick()
+		cmds = append(cmds, headerTick())
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "esc":
@@ -145,30 +128,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			m.quitting = true
 			m.cancelFunc()
-			return m, tea.Quit
+			cmds = append(cmds, tea.Quit)
 		}
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
-		return m, tea.Batch(cmd, WaitForEvent(m.cacheEvents))
-
+		cmds = append(cmds, cmd, m.spinner.Tick)
 		// Cache warming events
 	case events.CacheEvent:
 		switch msg.Type {
 		case events.CacheStarted:
-			m.cacheStageMsg = "Initializing cache..."
 			m.state = cacheWarming
-			return m, WaitForEvent(m.cacheEvents)
+			m.cacheStageMsg = "Initializing cache..."
 		case events.CacheLoading:
 			m.cacheStageMsg = fmt.Sprintf("Fetching %s", msg.CurrentDefinition.String())
-			return m, WaitForEvent(m.cacheEvents)
 		case events.CacheFinished:
 			// Cache warming finished, now moving to datasetProcessing
-			var cmds []tea.Cmd = []tea.Cmd{WaitForEvent(m.consumerEvents), headerTick(), renderTick()}
 			m.cacheStageMsg = fmt.Sprintf("Finished warming up the cache with %d entries", msg.Size)
 			m.state = datasetProcessing
-			return m, tea.Batch(cmds...)
 		}
 
 	// Broker events related to uiEvents events
@@ -194,10 +172,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.dirty = true
-		return m, WaitForEvent(m.consumerEvents)
 	}
 
-	return m, nil
+	return m, tea.Batch(cmds...)
 }
 
 func (m Model) View() tea.View {

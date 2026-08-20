@@ -45,6 +45,7 @@ func (c *DatasetConsumer) Start(ctx context.Context) error {
 
 	for filepath, entry := range c.FileIndex {
 		start := time.Now()
+		slog.Info("Processing zstd file", "filename", entry.Name)
 		file, err := os.Open(filepath)
 		if err != nil {
 			slog.Error("Error while opening file", "file", file, "error", err)

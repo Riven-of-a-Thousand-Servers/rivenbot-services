@@ -7,6 +7,8 @@ type Entry struct {
 	ReleaseIcon               string            `json:"releaseIcon"`
 	ReleaseTime               int               `json:"releaseTime"`
 	ItemType                  int               `json:"itemType"`
+	DefaultDamageTypeHash     int64             `json:"defaultDamageTypeHash"`
+	DamageTypeHashes          []int64           `json:"damageTypeHashes"`
 	EquippingBlock            EquippingBlock    `json:"equippingBlock"`
 }
 
@@ -18,6 +20,6 @@ type DisplayProperties struct {
 }
 
 type EquippingBlock struct {
-	EquipmentSlotTypeHash int `json:"equipmentSlotTypeHash"`
-	AmmoType              int `json:"ammoType"`
+	EquipmentSlotTypeHash int64 `json:"equipmentSlotTypeHash"`
+	AmmoType              int   `json:"ammoType"`
 }
