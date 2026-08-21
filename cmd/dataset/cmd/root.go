@@ -34,6 +34,8 @@ type datasetOpts struct {
 	ApiKey     string
 	Goroutines int
 	Noop       bool
+	NumFiles   int
+	NumLines   int
 }
 
 func newRootCommand() *cobra.Command {
@@ -86,8 +88,8 @@ dataset`,
 				return err
 			}
 
-			consumer := consumer.NewDatasetConsumer(files, 2048)
-			cache := cache.NewInMemoryCache[manifest.Entry](5)
+			consumer := consumer.NewDatasetConsumer(files, 48, consumer.ConsumerOpts{NumFiles: opts.NumFiles, NumLines: opts.NumLines})
+			cache := cache.NewInMemoryCache[manifest.Entry](10)
 			mapper := mapper.New(cache)
 
 			var processor *process.DatasetProcessor
@@ -150,6 +152,8 @@ dataset`,
 	}
 
 	flags := cmd.Flags()
+	flags.IntVar(&opts.NumLines, "lines", 0, "Number of rows-per-file to process")
+	flags.IntVar(&opts.NumFiles, "files", 0, "Number of files to process")
 	flags.StringVarP(&opts.RootDir, "root-dir", "r", "", "Root directory to scan files from")
 	flags.StringVarP(&opts.DbUrl, "db-url", "d", "", "URL to the Postgres DB")
 	flags.StringVarP(&opts.ApiKey, "api-key", "a", "", "Bungie.net API key")

@@ -291,7 +291,7 @@ func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcrs.P
 				strHash := strconv.FormatInt(ciw.WeaponHash, 10)
 				params, err := p.mapper.WeaponInfoToDBEntity(ctx, ciw)
 				if err != nil {
-					slog.Info("Failed to map weapon to db entity", "hash", strHash, "error", err)
+					slog.Error("Failed to map weapon to db entity", "hash", strHash, "error", err)
 					return err
 				}
 

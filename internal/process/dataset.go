@@ -18,7 +18,7 @@ type DatasetProcessor struct {
 func NewDatasetProcessor(processor Processor[json.RawMessage]) *DatasetProcessor {
 	return &DatasetProcessor{
 		processor: processor,
-		Broker:    pubsub.NewBroker[uiEvents.FileEvent](2048),
+		Broker:    pubsub.NewBroker[uiEvents.FileEvent](30000),
 	}
 }
 

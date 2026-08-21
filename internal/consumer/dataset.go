@@ -17,17 +17,26 @@ import (
 
 const maxSize = 1024 * 1024 * 20 // 20 MBs
 
+type ConsumerOpts struct {
+	NumFiles int
+	NumLines int
+}
+
 type DatasetConsumer struct {
 	*pubsub.Broker[events.FileEvent]
 	FileIndex FileIndex
 	once      sync.Once
 	ch        chan Delivery[dataset.Entry]
+	numFiles  int
+	numLines  int
 }
 
-func NewDatasetConsumer(idx FileIndex, brokerSize int) *DatasetConsumer {
+func NewDatasetConsumer(idx FileIndex, brokerSize int, opts ConsumerOpts) *DatasetConsumer {
 	return &DatasetConsumer{
 		FileIndex: idx,
 		Broker:    pubsub.NewBroker[events.FileEvent](brokerSize),
+		numFiles:  opts.NumFiles,
+		numLines:  opts.NumLines,
 	}
 }
 
@@ -43,7 +52,12 @@ func (c *DatasetConsumer) Consume(ctx context.Context) (<-chan Delivery[dataset.
 func (c *DatasetConsumer) Start(ctx context.Context) error {
 	defer close(c.ch)
 
+	fileCount := 0
 	for filepath, entry := range c.FileIndex {
+		if c.numFiles != 0 && fileCount > c.numFiles {
+			return nil
+		}
+
 		start := time.Now()
 		slog.Info("Processing zstd file", "filename", entry.Name)
 		file, err := os.Open(filepath)
@@ -74,12 +88,17 @@ func (c *DatasetConsumer) Start(ctx context.Context) error {
 			Elapsed:  time.Since(start),
 		})
 
+		lineCount := 0
 		count := 0
 		for scanner.Scan() {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			default:
+				if c.numFiles > 0 && lineCount > c.numFiles {
+					break
+				}
+
 				payload := dataset.Entry{
 					Bytes:    scanner.Bytes(),
 					Filename: entry.Name,
@@ -106,6 +125,8 @@ func (c *DatasetConsumer) Start(ctx context.Context) error {
 					Filename: file.Name(),
 					Elapsed:  time.Since(start),
 				})
+
+				lineCount++
 				count++
 			}
 		}
@@ -120,6 +141,8 @@ func (c *DatasetConsumer) Start(ctx context.Context) error {
 		if err := scanner.Err(); err != nil {
 			return err
 		}
+
+		fileCount++
 	}
 
 	return nil

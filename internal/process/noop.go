@@ -14,6 +14,6 @@ func NoOpProcessor[T any]() *NoopProcessor[T] {
 }
 
 func (p *NoopProcessor[T]) ProcessPgcr(ctx context.Context, b T, source types.Source) error {
-	slog.Info("Processed Pgcr! (Noop)")
+	slog.Debug("Processed Pgcr! (Noop)")
 	return nil
 }

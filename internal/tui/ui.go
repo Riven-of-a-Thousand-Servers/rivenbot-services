@@ -152,17 +152,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Broker events related to uiEvents events
 	case events.FileEvent:
 		switch msg.Type {
-		case events.FileStarted:
-			m.inFlight[msg.Filename] = &fileState{
-				rowsTotal: rowsPerFile,
-				startedAt: time.Now(),
-			}
+		// case events.FileStarted:
+		// 	m.inFlight[msg.Filename] = &fileState{
+		// 		rowsTotal: rowsPerFile,
+		// 		startedAt: time.Now(),
+		// 	}
 		case events.FileProgress:
-			if state, ok := m.inFlight[msg.Filename]; ok {
-				state.rowsDone = msg.RowsDone
-				if msg.Err != nil {
-					state.errCount++
+			_, ok := m.inFlight[msg.Filename]
+			if !ok {
+				m.inFlight[msg.Filename] = &fileState{
+					rowsTotal: rowsPerFile,
+					startedAt: time.Now(),
 				}
+			}
+
+			m.inFlight[msg.Filename].rowsDone = msg.RowsDone
+			if msg.Err != nil {
+				m.inFlight[msg.Filename].errCount++
 			}
 		case events.FileCompleted:
 			delete(m.inFlight, msg.Filename)
@@ -179,9 +185,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) View() tea.View {
 	switch m.state {
-	case databaseLoading:
-		body := m.spinner.View() + " Initializing database connection"
-		return tea.NewView(body)
 	case cacheWarming:
 		s := "\nCache Warming Sequence\n"
 		s += fmt.Sprintf("\n%s %s", m.spinner.View(), m.cacheStageMsg)
