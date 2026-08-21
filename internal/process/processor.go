@@ -157,7 +157,7 @@ func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcrs.P
 
 	switch status {
 	case types.Success:
-		slog.Info("Instanced already processed successfully, skipping", "instanceId", pgcr.InstanceId)
+		slog.Info("Instance already processed successfully, skipping", "instanceId", pgcr.InstanceId, "processedAt", entry.FirstSeenAt.String())
 		return nil
 	case types.Errored:
 		slog.Warn("Retrying previously failed instance", "instanceId", pgcr.InstanceId)
@@ -177,7 +177,7 @@ func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcrs.P
 	})
 
 	if errors.Is(err, sql.ErrNoRows) {
-		slog.Info("Lost the claim race, skipping", "instanceId", pgcr.InstanceId)
+		slog.Debug("Lost the claim race, skipping", "instanceId", pgcr.InstanceId)
 		return nil
 	}
 

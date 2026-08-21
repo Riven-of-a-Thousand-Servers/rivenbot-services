@@ -50,6 +50,8 @@ type fileState struct {
 	errCount  int
 }
 
+// TODO: Add lipgloss composite panes to visualize logs in the same pane as the
+// table for the file progress
 type Model struct {
 	// Switches from Database loading, cache warming, and actual processing
 	state uiState
@@ -70,12 +72,6 @@ type Model struct {
 	cancelFunc context.CancelFunc
 }
 
-// This approach of passing the individual channels is probably the right choice for this sequential
-// TUI where database status > cache warming > dataset processing takes place
-//
-// The alternative to this is to fan-in every channel to the tea.Send(..) method
-// so the program gets messages from the outside, however, this would make sense
-// if the TUI needs to listen for concurrent messages from several sources at the same time
 func NewModel(
 	cancelFunc context.CancelFunc,
 ) Model {
