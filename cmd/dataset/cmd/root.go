@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"slices"
 	"sync"
 	"syscall"
 
@@ -52,11 +53,13 @@ dataset`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			type cleanupFunc func() error
 			var cleanup []cleanupFunc
-			defer func(clean []cleanupFunc) {
-				for _, c := range clean {
-					c()
+			defer func() {
+				for _, c := range slices.Backward(cleanup) {
+					if err := c(); err != nil {
+						slog.Error("Error while cleaning up", "error", err)
+					}
 				}
-			}(cleanup)
+			}()
 
 			ctx, cancel := signal.NotifyContext(cmd.Context(), syscall.SIGTERM, syscall.SIGINT)
 			defer cancel()
@@ -66,20 +69,15 @@ dataset`,
 			if err != nil {
 				return err
 			}
-			defer logFile.Close()
 
-			// Will only log errors
+			cleanup = append(cleanup, logFile.Close)
+
 			slog.SetDefault(slog.New(slog.NewJSONHandler(logFile, &slog.HandlerOptions{
 				Level: slog.LevelInfo.Level(),
 			})))
 
 			g, groupCtx := errgroup.WithContext(ctx)
 
-			program := tea.NewProgram(ui.NewModel(cancel), tea.WithContext(groupCtx))
-			g.Go(func() error {
-				_, err := program.Run()
-				return err
-			})
 			// Discover all .zst files before anything
 			// This cannot fail, otherwise everything goes to shit
 			discoverer := consumer.NewDiscoverer(opts.RootDir)
@@ -88,36 +86,23 @@ dataset`,
 				return err
 			}
 
-			consumer := consumer.NewDatasetConsumer(files, 48, consumer.ConsumerOpts{NumFiles: opts.NumFiles, NumLines: opts.NumLines})
-			cache := cache.NewInMemoryCache[manifest.Entry](10)
-			mapper := mapper.New(cache)
+			// Setup Tea.Program before cache start prepopulating so we can capture events
+			program := tea.NewProgram(ui.NewModel(cancel), tea.WithContext(groupCtx))
+			g.Go(func() error {
+				_, err := program.Run()
+				return err
+			})
 
-			var processor *process.DatasetProcessor
-			switch {
-			case opts.Noop:
-				processor = process.NewDatasetProcessor(process.NoOpProcessor[json.RawMessage]())
-			default:
-				conn, err := db.Connect(groupCtx, opts.DbUrl)
-				if err != nil {
-					return err
-				}
-				defer conn.Close()
-
-				queries, err := db.Prepare(groupCtx, conn)
-				if err != nil {
-					return err
-				}
-
-				inner := process.NewPgcrProcessor(conn, queries, mapper)
-				processor = process.NewDatasetProcessor(inner)
-			}
 			// setup events
 			var eventsWg sync.WaitGroup
 			eventsCh := make(chan tea.Msg, 20_000)
-			setupEvents(ctx, &eventsWg, eventsCh, cache)
-			setupEvents(ctx, &eventsWg, eventsCh, consumer)
-			setupEvents(ctx, &eventsWg, eventsCh, processor)
+			go publishEventsToTea(groupCtx, program, eventsCh)
 
+			consumer := consumer.NewDatasetConsumer(files, 48, consumer.ConsumerOpts{NumFiles: opts.NumFiles, NumLines: opts.NumLines})
+			cache := cache.NewInMemoryCache[manifest.Entry](10)
+			setupEvents(ctx, &eventsWg, eventsCh, cache)
+
+			// Prepopulate immediately before instantiating map
 			if err = cache.Prepopulate(groupCtx,
 				opts.ApiKey,
 				manifest.InventoryItemDefinition,
@@ -127,6 +112,30 @@ dataset`,
 				manifest.DamageTypeDefinition); err != nil {
 				return err
 			}
+
+			mapper := mapper.New(cache)
+			var processor *process.DatasetProcessor
+			switch {
+			case opts.Noop:
+				processor = process.NewDatasetProcessor(process.NoOpProcessor[json.RawMessage]())
+			default:
+				conn, err := db.Connect(groupCtx, opts.DbUrl)
+				if err != nil {
+					return err
+				}
+				cleanup = append(cleanup, conn.Close)
+
+				queries, err := db.Prepare(groupCtx, conn)
+				if err != nil {
+					return err
+				}
+
+				inner := process.NewPgcrProcessor(conn, queries, mapper)
+				processor = process.NewDatasetProcessor(inner)
+			}
+
+			setupEvents(ctx, &eventsWg, eventsCh, consumer)
+			setupEvents(ctx, &eventsWg, eventsCh, processor)
 
 			cleanup = append(cleanup, func() error {
 				eventsWg.Wait()
@@ -139,10 +148,9 @@ dataset`,
 					return worker.Begin(groupCtx)
 				})
 			}
-			go publishEventsToTea(ctx, program, eventsCh)
 
 			err = g.Wait()
-			if err != nil && !errors.Is(err, context.Canceled) {
+			if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, tea.ErrProgramKilled) {
 				slog.Error("Error during execution of dataset", "error", err)
 				return err
 			}
@@ -170,12 +178,12 @@ func publishEventsToTea(ctx context.Context, program *tea.Program, out <-chan te
 			slog.Debug("Context cancelled, TUI message handler is shutting down")
 			return
 		case msg, ok := <-out:
-			slog.Info("Publishing event", "msg", msg)
 			if !ok {
 				slog.Debug("TUI message channel closed")
 				return
 			}
 
+			slog.Info("Publishing event", "msg", msg)
 			program.Send(msg)
 		}
 	}

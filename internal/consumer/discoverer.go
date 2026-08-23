@@ -22,6 +22,14 @@ type FileEntry struct {
 	Done    bool
 }
 
+func (e *FileEntry) SetStarted() {
+	e.Started = true
+}
+
+func (e *FileEntry) SetDone() {
+	e.Done = true
+}
+
 func NewDiscoverer(root string) *FileDiscoverer {
 	return &FileDiscoverer{Root: root}
 }
@@ -40,7 +48,8 @@ func (f *FileDiscoverer) Discover(ctx context.Context, extension string) (FileIn
 			return err
 		}
 
-		if d.IsDir() && strings.HasPrefix(d.Name(), ".") {
+		// Skip any hidden directories or the $RECYBLE_BIN directory
+		if d.IsDir() && (strings.HasPrefix(d.Name(), ".") || strings.HasPrefix(d.Name(), "$")) {
 			return filepath.SkipDir
 		}
 

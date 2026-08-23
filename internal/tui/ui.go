@@ -27,13 +27,13 @@ const (
 )
 
 type (
-	HeaderTickMsg time.Time
-	RenderTickMsg time.Time
+	HeaderTickMsg     time.Time
+	BodyRenderTickMsg time.Time
 )
 
 func renderTick() tea.Cmd {
 	return tea.Tick(renderPeriod, func(t time.Time) tea.Msg {
-		return RenderTickMsg{}
+		return BodyRenderTickMsg{}
 	})
 }
 
@@ -98,13 +98,13 @@ func WaitForEvent[T any](ch <-chan T) tea.Cmd {
 
 // Start listening for broker events
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick)
+	return m.spinner.Tick
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
-	case RenderTickMsg:
+	case BodyRenderTickMsg:
 		if m.dirty {
 			m.tbl.SetRows(m.tableRows())
 			m.dirty = false
@@ -135,6 +135,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case events.CacheEvent:
 		switch msg.Type {
 		case events.CacheStarted:
+			var cmd tea.Cmd
+			m.spinner, cmd = m.spinner.Update(msg)
+			cmds = append(cmds, cmd)
 			m.state = cacheWarming
 			m.cacheStageMsg = "Initializing cache..."
 		case events.CacheLoading:
@@ -148,11 +151,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Broker events related to uiEvents events
 	case events.FileEvent:
 		switch msg.Type {
-		// case events.FileStarted:
-		// 	m.inFlight[msg.Filename] = &fileState{
-		// 		rowsTotal: rowsPerFile,
-		// 		startedAt: time.Now(),
-		// 	}
+		case events.FileStarted:
+			m.inFlight[msg.Filename] = &fileState{
+				rowsTotal: rowsPerFile,
+				startedAt: time.Now(),
+			}
 		case events.FileProgress:
 			_, ok := m.inFlight[msg.Filename]
 			if !ok {
