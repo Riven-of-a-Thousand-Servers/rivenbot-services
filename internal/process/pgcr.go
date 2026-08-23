@@ -24,13 +24,13 @@ type Processor[T any] interface {
 type PgcrProcessor struct {
 	db      *sql.DB
 	queries *db.Queries
-	mapper  *mapper.Mapper
+	mapper  mapper.Mapper
 }
 
 // Full Processor with RabbitMQ as an extra dependency
 func NewPgcrProcessor(db *sql.DB,
 	queries *db.Queries,
-	mapper *mapper.Mapper,
+	mapper mapper.Mapper,
 ) *PgcrProcessor {
 	return &PgcrProcessor{
 		db:      db,
@@ -42,33 +42,14 @@ func NewPgcrProcessor(db *sql.DB,
 // This method takes in raw bytes and has no acknowledgement of RabbitMQ
 // Its the core processing logic that will be saved to the DB
 func (p *PgcrProcessor) ProcessPgcr(ctx context.Context, raw json.RawMessage, source types.Source) error {
-	var pgcr pgcrs.PostGameCarnageReport
-	var response pgcrs.Response
-	var err error
-
-	switch source {
-	case types.Dataset:
-		err = json.Unmarshal(raw, &pgcr)
-	case types.Crawler:
-		err = json.Unmarshal(raw, &response)
-	}
-
+	pgcr, err := decodePgcr(source, raw)
 	if err != nil {
-		slog.Error("Error unmarshalling body from message", "Error", err)
 		return err
 	}
 
-	if source == types.Crawler {
-		pgcr = response.Response
-	}
-
 	instanceId := pgcr.ActivityDetails.InstanceId
-	instanceId64, _ := strconv.ParseInt(string(instanceId), 10, 64)
-	mode := pgcr.ActivityDetails.Mode
-
-	// Only process raid activity
-	if pgcr.ActivityDetails.Mode != 4 {
-		slog.Debug("Pgcr is not a raid", "pgcr", instanceId, "mode", mode)
+	instanceId64 := instanceId.Int64()
+	if !isRaid(pgcr, instanceId) {
 		return nil
 	}
 
@@ -118,6 +99,37 @@ func (p *PgcrProcessor) ProcessPgcr(ctx context.Context, raw json.RawMessage, so
 	}
 
 	return nil
+}
+
+func isRaid(pgcr pgcrs.PostGameCarnageReport, instanceId pgcrs.StringInt64) bool {
+	if pgcr.ActivityDetails.Mode != 4 {
+		slog.Debug("Pgcr is not a raid", "pgcr", instanceId, "mode", pgcr.ActivityDetails.Mode)
+		return false
+	}
+	return true
+}
+
+func decodePgcr(source types.Source, raw json.RawMessage) (pgcrs.PostGameCarnageReport, error) {
+	var pgcr pgcrs.PostGameCarnageReport
+	var response pgcrs.Response
+	var err error
+
+	switch source {
+	case types.Dataset:
+		err = json.Unmarshal(raw, &pgcr)
+	case types.Crawler:
+		err = json.Unmarshal(raw, &response)
+	}
+
+	if err != nil {
+		slog.Error("Error unmarshalling body from message", "Error", err)
+		return pgcrs.PostGameCarnageReport{}, err
+	}
+
+	if source == types.Crawler {
+		pgcr = response.Response
+	}
+	return pgcr, nil
 }
 
 func (p *PgcrProcessor) LedgerMarkSuccess(ctx context.Context, queries *db.Queries, instanceId int64) error {
@@ -289,7 +301,7 @@ func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcrs.P
 			for _, ciw := range ci.WeaponInfo {
 				// Weapons
 				strHash := strconv.FormatInt(ciw.WeaponHash, 10)
-				params, err := p.mapper.WeaponInfoToDBEntity(ctx, ciw)
+				params, err := p.mapper.WeaponInfoToDBEntity(ctx, &ciw)
 				if err != nil {
 					slog.Error("Failed to map weapon to db entity", "hash", strHash, "error", err)
 					return err

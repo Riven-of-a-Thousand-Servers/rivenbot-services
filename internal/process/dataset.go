@@ -12,18 +12,18 @@ import (
 
 type DatasetProcessor struct {
 	*pubsub.Broker[uiEvents.FileEvent]
-	processor Processor[json.RawMessage]
+	inner Processor[json.RawMessage]
 }
 
-func NewDatasetProcessor(processor Processor[json.RawMessage]) *DatasetProcessor {
+func NewDatasetProcessor(inner Processor[json.RawMessage]) *DatasetProcessor {
 	return &DatasetProcessor{
-		processor: processor,
-		Broker:    pubsub.NewBroker[uiEvents.FileEvent](30000),
+		inner:  inner,
+		Broker: pubsub.NewBroker[uiEvents.FileEvent](30000),
 	}
 }
 
 func (p *DatasetProcessor) ProcessPgcr(ctx context.Context, entry dataset.Entry, source types.Source) error {
-	if err := p.processor.ProcessPgcr(ctx, entry.Bytes, source); err != nil {
+	if err := p.inner.ProcessPgcr(ctx, entry.Bytes, source); err != nil {
 		p.Publish(uiEvents.FileEvent{
 			Type:     uiEvents.FileError,
 			Filename: entry.Filename,

@@ -111,13 +111,13 @@ func (c *PgcrCrawler) Get(ctx context.Context, workerId int, instanceId int64, a
 }
 
 func (c *PgcrCrawler) Crawl(ctx context.Context, workerId int, apiKey string) {
-	prod, err := c.Producer.NewProducer(ctx)
+	prodCh, err := c.Producer.NewProducer(ctx)
 	// Error opening a channel should immediately return
 	if err != nil {
 		slog.Error("Failed to open rabbitmq channel", "workerId", workerId, "error", err)
 		return
 	}
-	defer prod.Close()
+	defer prodCh.Close()
 
 	for {
 		select {
@@ -137,7 +137,7 @@ func (c *PgcrCrawler) Crawl(ctx context.Context, workerId int, apiKey string) {
 				continue
 			}
 
-			if err = prod.Produce(ctx, json.RawMessage(data)); err != nil {
+			if err = prodCh.Produce(ctx, json.RawMessage(data)); err != nil {
 				slog.Error("Unable to publish message", "pgcr", next, "workerId", workerId, "error", err)
 				continue
 			}

@@ -36,6 +36,15 @@ type ActivityEntry struct {
 // vast majority are int64s
 type StringInt64 string
 
+func (s StringInt64) String() string {
+	return string(s)
+}
+
+func (s StringInt64) Int64() int64 {
+	i, _ := strconv.ParseInt(string(s), 10, 64)
+	return i
+}
+
 func (s *StringInt64) UnmarshalJSON(data []byte) error {
 	var str string
 	if err := json.Unmarshal(data, &str); err == nil {
