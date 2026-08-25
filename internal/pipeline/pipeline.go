@@ -63,7 +63,7 @@ func (f *FileReader[T]) ReadFrom(ctx context.Context) (T, error) {
 type StdoutWriter[T any] struct{}
 
 func (o *StdoutWriter[T]) WriteTo(ctx context.Context, item T) error {
-	_, err := fmt.Printf("<Item>: %v", item)
+	_, err := fmt.Printf("<Item>: %v\n", item)
 	return err
 }
 

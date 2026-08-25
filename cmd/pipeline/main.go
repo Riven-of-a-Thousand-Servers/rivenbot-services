@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"pgcr-processing-service/internal/pipeline"
 	"pgcr-processing-service/internal/types/pgcr"
@@ -32,10 +33,21 @@ func main() {
 	// filter = filterFunc
 
 	// This should trigger it?
-	err := pipeline.From(reader).
-		MapTo(itemMapper).
-		WriteTo(ctx, writer)
-	if err != nil {
-		fmt.Printf("Error running pipeline: %v", err)
+	workers := 4
+
+	var wg sync.WaitGroup
+
+	for range workers {
+		wg.Go(func() {
+			err := pipeline.From(reader).
+				MapTo(itemMapper).
+				WriteTo(ctx, writer)
+			if err != nil {
+				fmt.Printf("Error running pipeline: %v", err)
+			}
+		},
+		)
 	}
+
+	wg.Wait()
 }
