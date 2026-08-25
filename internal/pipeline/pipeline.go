@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"pgcr-processing-service/internal/types/pgcr"
 )
 
 // Pipeline represents a series of sequentially chaining steps that are taken
@@ -33,6 +34,10 @@ type ItemFilter[T any] interface {
 	Accept(context.Context, T) (bool, error)
 }
 
+type ItemMapper[T any, R any] interface {
+	Map(context.Context, T) (R, error)
+}
+
 // Custom made reader that reads from a file with location Path
 type FileReader[T any] struct {
 	// The path of the file to read
@@ -58,8 +63,8 @@ func (f *FileReader[T]) ReadFrom(ctx context.Context) (T, error) {
 type StdoutWriter[T any] struct{}
 
 func (o *StdoutWriter[T]) WriteTo(ctx context.Context, item T) error {
-	fmt.Printf("<Item>: %v", item)
-	return nil
+	_, err := fmt.Printf("<Item>: %v", item)
+	return err
 }
 
 // The Predicate type wraps a function that evaluates an item of type T
@@ -133,4 +138,30 @@ func (p *Pipeline[T]) WriteTo(ctx context.Context, itemWriter ItemWriter[T]) err
 	}
 
 	return itemWriter.WriteTo(ctx, res)
+}
+
+type PgcrMapper struct {}
+
+func (m *PgcrMapper) Map(ctx context.Context, item pgcr.PostGameCarnageReport) (int64, error) {
+	return item.ActivityDetails.InstanceId.Int64(), nil
+}
+
+func (p *Pipeline[T]) MapTo[R any](itemMapper ItemMapper[T, R]) *Pipeline[R] {
+	prev := p.pull
+	return &Pipeline[R]{
+		pull: func(ctx context.Context) (R, bool, error) {
+			var zero R
+			item, ok, err := prev(ctx)
+			if !ok || err != nil {
+				return zero, false, err
+			}
+
+			new, err := itemMapper.Map(ctx, item)
+			if err != nil {
+				return zero, false, err
+			}
+
+			return new, true, nil
+		},
+	}
 }

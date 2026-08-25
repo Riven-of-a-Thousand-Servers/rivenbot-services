@@ -13,7 +13,7 @@ func main() {
 	reader := &pipeline.FileReader[pgcr.PostGameCarnageReport]{
 		Path: "example.json",
 	}
-	writer := &pipeline.StdoutWriter[pgcr.PostGameCarnageReport]{}
+	writer := &pipeline.StdoutWriter[int64]{}
 
 	// criterion := func(item pgcr.PostGameCarnageReport) bool {
 	// 	return item.ActivityDetails.InstanceId.Int64() != 0
@@ -26,14 +26,14 @@ func main() {
 	// 	return true, nil
 	// }
 
+	itemMapper := &pipeline.PgcrMapper{}
+
 	// var filter pipeline.Predicate[pgcr.PostGameCarnageReport]
 	// filter = filterFunc
 
 	// This should trigger it?
 	err := pipeline.From(reader).
-		// Filter(filter).
-		// FilterFunc(filterFunc).
-		// If(criterion).
+		MapTo(itemMapper).
 		WriteTo(ctx, writer)
 	if err != nil {
 		fmt.Printf("Error running pipeline: %v", err)
