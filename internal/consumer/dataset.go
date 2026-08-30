@@ -43,7 +43,8 @@ func NewDatasetConsumer(idx FileIndex, brokerSize int, opts ConsumerOpts) *Datas
 
 func (c *DatasetConsumer) Consume(ctx context.Context) (<-chan Delivery[dataset.Entry], error) {
 	c.once.Do(func() {
-		c.ch = make(chan Delivery[dataset.Entry])
+		// TODO: Remove hard cap on the consumer channel
+		c.ch = make(chan Delivery[dataset.Entry], 10)
 		go c.Start(ctx)
 	})
 
