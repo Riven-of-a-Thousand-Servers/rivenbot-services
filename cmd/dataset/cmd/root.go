@@ -20,11 +20,15 @@ import (
 	"pgcr-processing-service/internal/mapper"
 	"pgcr-processing-service/internal/process"
 	"pgcr-processing-service/internal/pubsub"
-	"pgcr-processing-service/internal/runner"
 	ui "pgcr-processing-service/internal/tui"
+	"pgcr-processing-service/internal/types/dataset"
 	"pgcr-processing-service/internal/types/manifest"
+	"pgcr-processing-service/internal/types/pgcr"
+
+	"pgcr-processing-service/internal/pipeline"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/deahtstroke/chainmorph"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 )
@@ -98,7 +102,7 @@ dataset`,
 			eventsCh := make(chan tea.Msg, 20_000)
 			go publishEventsToTea(groupCtx, program, eventsCh)
 
-			consumer := consumer.NewDatasetConsumer(files, 48, consumer.ConsumerOpts{NumFiles: opts.NumFiles, NumLines: opts.NumLines})
+			c := consumer.NewDatasetConsumer(files, 48, consumer.ConsumerOpts{NumFiles: opts.NumFiles, NumLines: opts.NumLines})
 			cache := cache.NewInMemoryCache[manifest.Entry](10)
 			setupEvents(ctx, &eventsWg, eventsCh, cache)
 
@@ -131,10 +135,9 @@ dataset`,
 				}
 
 				inner := process.NewPgcrProcessor(conn, queries, mapper)
-				processor = process.NewDatasetProcessor(inner)
 			}
 
-			setupEvents(ctx, &eventsWg, eventsCh, consumer)
+			setupEvents(ctx, &eventsWg, eventsCh, c)
 			setupEvents(ctx, &eventsWg, eventsCh, processor)
 
 			cleanup = append(cleanup, func() error {
@@ -142,10 +145,27 @@ dataset`,
 				return nil
 			})
 
-			worker := runner.NewWorker(processor, consumer)
+			ch, err := c.Consume(ctx)
+			if err != nil {
+				os.Exit(1)
+			}
 			for range opts.Goroutines {
 				g.Go(func() error {
-					return worker.Begin(groupCtx)
+					chReader := pipeline.NewChannelReader[consumer.Delivery[dataset.Entry]](ch)
+					mapper := pipeline.NewPgcrInfoMapper(mapper)
+					return chainmorph.From(chReader).
+						MapFunc(pipeline.MapRawPgcr).
+						If(func(item pgcr.PostGameCarnageReport) bool {
+							// ~ Magic number time
+							// I havent' had time to write the consts for game modes =(
+							// All you need to know is Raids in Bungie API are Mode = 4
+							// see: https://bungie-net.github.io/multi/schema_Destiny-HistoricalStats-Definitions-DestinyActivityModeType.html#schema_Destiny-HistoricalStats-Definitions-DestinyActivityModeType
+							return item.ActivityDetails.Mode == 4
+						}).
+						MapTo(mapper).
+						// TODO: Figure out how to branch out several writes to DB
+						// based on the entity passed in, e.g., Weapons, Compressed Pgcr, Instance Activities, etc.
+						WriteTo(ctx, nil)
 				})
 			}
 

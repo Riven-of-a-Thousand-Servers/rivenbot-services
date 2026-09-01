@@ -3,16 +3,15 @@ package process
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
 	"time"
 
-	"pgcr-processing-service/internal/compress"
 	"pgcr-processing-service/internal/db"
 	"pgcr-processing-service/internal/mapper"
+	"pgcr-processing-service/internal/types/pgcr"
 	pgcrs "pgcr-processing-service/internal/types/pgcr"
 	types "pgcr-processing-service/internal/types/processor"
 )
@@ -41,29 +40,8 @@ func NewPgcrProcessor(db *sql.DB,
 
 // This method takes in raw bytes and has no acknowledgement of RabbitMQ
 // Its the core processing logic that will be saved to the DB
-func (p *PgcrProcessor) ProcessPgcr(ctx context.Context, raw json.RawMessage, source types.Source) error {
-	pgcr, err := decodePgcr(source, raw)
-	if err != nil {
-		return err
-	}
-
-	instanceId := pgcr.ActivityDetails.InstanceId
-	instanceId64 := instanceId.Int64()
-	if !isRaid(pgcr, instanceId) {
-		return nil
-	}
-
-	slog.Info("Processing pgcr", "instanceId", instanceId)
-	processed, err := p.mapper.PgcrToPgcrInfo(ctx, &pgcr)
-	if err != nil {
-		return err
-	}
-
-	compressed, err := compress.Gzip(&pgcr)
-	if err != nil {
-		slog.Error("Unable to compress pgcr", "instanceId", instanceId, "error", err)
-		return err
-	}
+func (p *PgcrProcessor) ProcessPgcr(ctx context.Context, pgcr pgcr.PgcrInfo, source types.Source) error {
+	slog.Info("Processing pgcr", "instanceId", pgcr.InstanceId)
 
 	tx, err := p.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -73,63 +51,32 @@ func (p *PgcrProcessor) ProcessPgcr(ctx context.Context, raw json.RawMessage, so
 	defer tx.Rollback()
 
 	qtx := p.queries.WithTx(tx)
-	err = p.Save(ctx, qtx, processed, source, compressed)
+	err = p.Save(ctx, qtx, &pgcr, source)
 	if err != nil {
-		if markErr := p.LedgerMarkError(ctx, p.queries, instanceId64, err); markErr != nil {
-			slog.Error("Failed to mark ledger entry as failed", "instanceId", instanceId, "error", err)
+		if markErr := p.LedgerMarkError(ctx, p.queries, pgcr.InstanceId, err); markErr != nil {
+			slog.Error("Failed to mark ledger entry as failed", "instanceId", pgcr.InstanceId, "error", err)
 			return markErr
 		}
-		slog.Error("Error processing pgcr into db", "instanceId", instanceId, "error", err)
+		slog.Error("Error processing pgcr into db", "instanceId", pgcr.InstanceId, "error", err)
 		return err
 	}
 
 	if err := tx.Commit(); err != nil {
-		if markErr := p.LedgerMarkError(ctx, p.queries, instanceId64, err); markErr != nil {
-			slog.Error("Failed to mark ledger entry as failed", "instanceId", instanceId, "error", err)
+		if markErr := p.LedgerMarkError(ctx, p.queries, pgcr.InstanceId, err); markErr != nil {
+			slog.Error("Failed to mark ledger entry as failed", "instanceId", pgcr.InstanceId, "error", err)
 			return markErr
 		}
-		slog.Error("Failed to commit transaction", "instanceId", instanceId, "error", err)
+		slog.Error("Failed to commit transaction", "instanceId", pgcr.InstanceId, "error", err)
 		return err
 	}
 
-	slog.Info("Finished processing pgcr", "InstanceId", instanceId)
-	if err := p.LedgerMarkSuccess(ctx, p.queries, instanceId64); err != nil {
-		slog.Error("Failed to mark ledger entry as processed", "instanceId", instanceId, "error", err)
+	slog.Info("Finished processing pgcr", "InstanceId", pgcr.InstanceId)
+	if err := p.LedgerMarkSuccess(ctx, p.queries, pgcr.InstanceId); err != nil {
+		slog.Error("Failed to mark ledger entry as processed", "instanceId", pgcr.InstanceId, "error", err)
 		return err
 	}
 
 	return nil
-}
-
-func isRaid(pgcr pgcrs.PostGameCarnageReport, instanceId pgcrs.StringInt64) bool {
-	if pgcr.ActivityDetails.Mode != 4 {
-		slog.Debug("Pgcr is not a raid", "pgcr", instanceId, "mode", pgcr.ActivityDetails.Mode)
-		return false
-	}
-	return true
-}
-
-func decodePgcr(source types.Source, raw json.RawMessage) (pgcrs.PostGameCarnageReport, error) {
-	var pgcr pgcrs.PostGameCarnageReport
-	var response pgcrs.Response
-	var err error
-
-	switch source {
-	case types.Dataset:
-		err = json.Unmarshal(raw, &pgcr)
-	case types.Crawler:
-		err = json.Unmarshal(raw, &response)
-	}
-
-	if err != nil {
-		slog.Error("Error unmarshalling body from message", "Error", err)
-		return pgcrs.PostGameCarnageReport{}, err
-	}
-
-	if source == types.Crawler {
-		pgcr = response.Response
-	}
-	return pgcr, nil
 }
 
 func (p *PgcrProcessor) LedgerMarkSuccess(ctx context.Context, queries *db.Queries, instanceId int64) error {
@@ -149,7 +96,7 @@ func (p *PgcrProcessor) LedgerMarkError(ctx context.Context, queries *db.Queries
 }
 
 // Saves a processed pgcr to the Postgres DB
-func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcrs.PgcrInfo, source types.Source, b []byte) error {
+func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcrs.PgcrInfo, source types.Source) error {
 	// If inserting to the ledger fails, skip inserting to the DB
 	entry, err := p.queries.CreateLogEntry(ctx, db.CreateLogEntryParams{
 		InstanceID: pgcr.InstanceId,
@@ -213,13 +160,15 @@ func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcrs.P
 		return err
 	}
 
-	if err := qtx.CreatePgcr(ctx, db.CreatePgcrParams{
-		InstanceID: pgcr.InstanceId,
-		Blob:       b,
-	}); err != nil {
-		slog.Error("Failed to save raw pgcr instance", "instanceId", pgcr.InstanceId, "error", err)
-		return err
-	}
+	// TODO: this should be a separate step outside of the main transaction
+	//
+	// if err := qtx.CreatePgcr(ctx, db.CreatePgcrParams{
+	// 	InstanceID: pgcr.InstanceId,
+	// 	Blob:       b,
+	// }); err != nil {
+	// 	slog.Error("Failed to save raw pgcr instance", "instanceId", pgcr.InstanceId, "error", err)
+	// 	return err
+	// }
 
 	// Player
 	for _, pi := range pgcr.PlayerInfo {
