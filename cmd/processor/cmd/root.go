@@ -21,7 +21,6 @@ import (
 	"pgcr-processing-service/internal/mapper"
 	"pgcr-processing-service/internal/process"
 	"pgcr-processing-service/internal/rabbitmq"
-	"pgcr-processing-service/internal/runner"
 	"pgcr-processing-service/internal/types/manifest"
 	"pgcr-processing-service/internal/utils"
 
@@ -58,7 +57,7 @@ func newProcessCommand() *cobra.Command {
 			defer rabbitmq.Conn.Close()
 
 			// Switch if Noop is passed in
-			var processor process.Processor[json.RawMessage]
+			var processor *process.NoopProcessor[json.RawMessage]
 			switch {
 			case opts.Noop:
 				processor = process.NoOpProcessor[json.RawMessage]()

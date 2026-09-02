@@ -8,20 +8,20 @@ import (
 	"time"
 
 	"pgcr-processing-service/internal/cache"
+	"pgcr-processing-service/internal/compress"
 	"pgcr-processing-service/internal/db"
 	"pgcr-processing-service/internal/types/manifest"
 	"pgcr-processing-service/internal/types/pgcr"
 )
 
-// PgcrMapper uses the supplied manifest cache to map elements of a PGCR to concrete
-// attributes from both the pgcr itself and the bungie manifest
-type PgcrMapper struct {
-	ManifestCache cache.ManifestCache[manifest.Entry]
+// Pgcr maps fields from the Raw PGCR json fields to equivalent database entities
+type DbMapper struct {
+	manifestCache cache.ManifestCache[manifest.Entry]
 }
 
-func New(cache cache.ManifestCache[manifest.Entry]) *PgcrMapper {
-	return &PgcrMapper{
-		ManifestCache: cache,
+func New(cache cache.ManifestCache[manifest.Entry]) *DbMapper {
+	return &DbMapper{
+		manifestCache: cache,
 	}
 }
 
@@ -29,36 +29,60 @@ const (
 	pstTimezone string = "America/Los_Angeles"
 )
 
-// Maps a pgcr.WeaponInfo struct to a db.CreateWeaponParams entity
-func (m *PgcrMapper) WeaponInfoToDBEntity(ctx context.Context, wep *pgcr.WeaponInfo) (db.CreateWeaponParams, error) {
-	var params db.CreateWeaponParams
-	itemDef, err := m.ManifestCache.Get(ctx, strconv.FormatInt(wep.WeaponHash, 10), manifest.InventoryItemDefinition)
+// Compresses the PostGameCarnageReport and returns the associated DB entity
+func (m *DbMapper) MapToBlobObject(pgcr pgcr.PostGameCarnageReport) (db.CreatePgcrParams, error) {
+	var params db.CreatePgcrParams
+	raw, err := compress.Gzip(pgcr)
 	if err != nil {
 		return params, err
 	}
 
-	damageTypeDef, err := m.ManifestCache.Get(ctx, strconv.FormatInt(itemDef.DefaultDamageTypeHash, 10), manifest.DamageTypeDefinition)
-	if err != nil {
-		return params, err
-	}
-
-	equipmentSlotDef, err := m.ManifestCache.Get(ctx, strconv.FormatInt(itemDef.EquippingBlock.EquipmentSlotTypeHash, 10), manifest.EquipmentSlotDefinition)
-	if err != nil {
-		return params, err
-	}
-
-	params = db.CreateWeaponParams{
-		WeaponHash:    wep.WeaponHash,
-		IconUrl:       itemDef.DisplayProperties.Icon,
-		WeaponName:    itemDef.DisplayProperties.Name,
-		DamageType:    damageTypeDef.DisplayProperties.Name,
-		EquipmentSlot: equipmentSlotDef.DisplayProperties.Name,
-	}
-
+	params.Blob = raw
+	params.InstanceID = pgcr.ActivityDetails.InstanceId.Int64()
 	return params, nil
 }
 
-func (m *PgcrMapper) PgcrToPgcrInfo(ctx context.Context, report *pgcr.PostGameCarnageReport) (*pgcr.PgcrInfo, error) {
+// Fetches all weapon definitions from a PGCR from all players into the its corresponding
+// database entities
+func (m *DbMapper) MapToDBWeapons(ctx context.Context, pgcr pgcr.PostGameCarnageReport) ([]db.CreateWeaponParams, error) {
+	var weps []db.CreateWeaponParams
+	for _, entry := range pgcr.Entries {
+		for _, weapon := range entry.Extended.Weapons {
+			params := db.CreateWeaponParams{
+				WeaponHash: weapon.ReferenceId,
+			}
+
+			itemDef, err := m.manifestCache.Get(ctx, strconv.FormatInt(weapon.ReferenceId, 10), manifest.InventoryItemDefinition)
+			if err != nil {
+				slog.Warn("Unable to fetch inventory item definiton", "hash", weapon.ReferenceId, "error", err)
+				params.IconUrl = ""
+				params.WeaponName = ""
+			} else {
+				params.IconUrl = itemDef.DisplayProperties.Icon
+				params.WeaponName = itemDef.DisplayProperties.Name
+			}
+
+			if damageDef, err := m.manifestCache.Get(ctx, strconv.FormatInt(itemDef.DefaultDamageTypeHash, 10), manifest.DamageTypeDefinition); err != nil {
+				slog.Warn("Unable to fetch default damage type definition", "hash", itemDef.DefaultDamageTypeHash, "error", err)
+				params.DamageType = ""
+			} else {
+				params.DamageType = damageDef.DisplayProperties.Name
+			}
+
+			if equipmentSlotDef, err := m.manifestCache.Get(ctx, strconv.FormatInt(itemDef.EquippingBlock.EquipmentSlotTypeHash, 10), manifest.EquipmentSlotDefinition); err != nil {
+				slog.Warn("Unable to fetch default equipment slot definition", "hash", itemDef.EquippingBlock.EquipmentSlotTypeHash, "error", err)
+				params.EquipmentSlot = ""
+			} else {
+				params.EquipmentSlot = equipmentSlotDef.DisplayProperties.Name
+			}
+
+			weps = append(weps, params)
+		}
+	}
+	return weps, nil
+}
+
+func (m *DbMapper) PgcrToPgcrInfo(ctx context.Context, report *pgcr.PostGameCarnageReport) (*pgcr.PgcrInfo, error) {
 	entity := pgcr.PgcrInfo{
 		ActivityHash: report.ActivityDetails.ActivityHash,
 	}
@@ -91,7 +115,7 @@ func (m *PgcrMapper) PgcrToPgcrInfo(ctx context.Context, report *pgcr.PostGameCa
 		return nil, err
 	}
 
-	res, err := m.ManifestCache.Get(ctx,
+	res, err := m.manifestCache.Get(ctx,
 		strconv.FormatInt(entity.ActivityHash, 10),
 		manifest.ActivityDefinition)
 	if err != nil {

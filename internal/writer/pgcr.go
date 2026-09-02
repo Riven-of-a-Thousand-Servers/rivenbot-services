@@ -1,4 +1,4 @@
-package process
+package writer
 
 import (
 	"context"
@@ -16,20 +16,16 @@ import (
 	types "pgcr-processing-service/internal/types/processor"
 )
 
-type Processor[T any] interface {
-	ProcessPgcr(context.Context, T, types.Source) error
-}
-
 type PgcrProcessor struct {
 	db      *sql.DB
 	queries *db.Queries
-	mapper  mapper.Mapper
+	mapper  *mapper.DbMapper
 }
 
 // Full Processor with RabbitMQ as an extra dependency
 func NewPgcrProcessor(db *sql.DB,
 	queries *db.Queries,
-	mapper mapper.Mapper,
+	mapper *mapper.DbMapper,
 ) *PgcrProcessor {
 	return &PgcrProcessor{
 		db:      db,
@@ -38,10 +34,26 @@ func NewPgcrProcessor(db *sql.DB,
 	}
 }
 
-// This method takes in raw bytes and has no acknowledgement of RabbitMQ
-// Its the core processing logic that will be saved to the DB
-func (p *PgcrProcessor) ProcessPgcr(ctx context.Context, pgcr pgcr.PgcrInfo, source types.Source) error {
-	slog.Info("Processing pgcr", "instanceId", pgcr.InstanceId)
+// Write order goes as follows:
+// 1. Compressed Blob
+// 2. Destiny Player data
+// 3. Weapon Information
+// 4. Instance Information
+func (p *PgcrProcessor) Write(ctx context.Context, pgcr pgcr.PostGameCarnageReport) error {
+	slog.Info("Processing pgcr", "pgcr", pgcr.ActivityDetails.InstanceId)
+
+	blob, err := p.mapper.MapToBlobObject(pgcr)
+	if err != nil {
+		return err
+	}
+
+	if p.queries.CreatePgcr(ctx, blob); err != nil {
+		return err
+	}
+
+	if err := p.saveWeapons(ctx, pgcr); err != nil {
+		return err
+	}
 
 	tx, err := p.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -50,8 +62,8 @@ func (p *PgcrProcessor) ProcessPgcr(ctx context.Context, pgcr pgcr.PgcrInfo, sou
 	}
 	defer tx.Rollback()
 
-	qtx := p.queries.WithTx(tx)
-	err = p.Save(ctx, qtx, &pgcr, source)
+	// TODO: Fix all this shit
+	err = p.Save(ctx, qtx, &pgcr)
 	if err != nil {
 		if markErr := p.LedgerMarkError(ctx, p.queries, pgcr.InstanceId, err); markErr != nil {
 			slog.Error("Failed to mark ledger entry as failed", "instanceId", pgcr.InstanceId, "error", err)
@@ -79,6 +91,30 @@ func (p *PgcrProcessor) ProcessPgcr(ctx context.Context, pgcr pgcr.PgcrInfo, sou
 	return nil
 }
 
+func (p *PgcrProcessor) saveWeapons(ctx context.Context, pgcr pgcrs.PostGameCarnageReport) error {
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+
+	defer tx.Rollback()
+
+	queries := p.queries.WithTx(tx)
+	weapons, err := p.mapper.MapToDBWeapons(ctx, pgcr)
+	if err != nil {
+		return err
+	}
+
+	for _, weapon := range weapons {
+		if err := queries.CreateWeapon(ctx, weapon); err != nil {
+			slog.Error("Unable to save weapon", "weaponId", weapon.WeaponHash, "error", err)
+			continue
+		}
+	}
+
+	return tx.Commit()
+}
+
 func (p *PgcrProcessor) LedgerMarkSuccess(ctx context.Context, queries *db.Queries, instanceId int64) error {
 	return queries.UpdateLogEntryStatus(ctx, db.UpdateLogEntryStatusParams{
 		InstanceID: instanceId,
@@ -96,11 +132,10 @@ func (p *PgcrProcessor) LedgerMarkError(ctx context.Context, queries *db.Queries
 }
 
 // Saves a processed pgcr to the Postgres DB
-func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcrs.PgcrInfo, source types.Source) error {
+func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcrs.PgcrInfo) error {
 	// If inserting to the ledger fails, skip inserting to the DB
 	entry, err := p.queries.CreateLogEntry(ctx, db.CreateLogEntryParams{
 		InstanceID: pgcr.InstanceId,
-		Source:     source.String(),
 		Status:     types.Started.String(),
 	})
 	if err != nil {

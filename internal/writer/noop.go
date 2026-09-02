@@ -1,10 +1,8 @@
-package process
+package writer
 
 import (
 	"context"
 	"log/slog"
-
-	types "pgcr-processing-service/internal/types/processor"
 )
 
 type NoopProcessor[T any] struct{}
@@ -13,7 +11,7 @@ func NoOpProcessor[T any]() *NoopProcessor[T] {
 	return &NoopProcessor[T]{}
 }
 
-func (p *NoopProcessor[T]) ProcessPgcr(ctx context.Context, b T, source types.Source) error {
+func (p *NoopProcessor[T]) Write(ctx context.Context, b T) error {
 	slog.Debug("Processed Pgcr! (Noop)")
 	return nil
 }
