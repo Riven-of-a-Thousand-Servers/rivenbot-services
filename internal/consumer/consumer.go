@@ -2,9 +2,6 @@ package consumer
 
 import (
 	"context"
-	"fmt"
-
-	"pgcr-processing-service/internal/types/processor"
 )
 
 // Represents each delivery item from amqp.delivery
@@ -22,23 +19,4 @@ type Delivery[T any] struct {
 // usually involves I/O operations such as network calls or file operations
 type Consumer[T any] interface {
 	Consume(context.Context) (<-chan Delivery[T], error)
-}
-
-func (d Delivery[T]) GetSource() (processor.Source, error) {
-	raw, ok := d.Headers["source"]
-	if !ok {
-		return 0, fmt.Errorf("missing source header")
-	}
-
-	str, ok := raw.(string)
-	if !ok {
-		return 0, fmt.Errorf("source header is not a string, got %T", raw)
-	}
-
-	source, ok := processor.ParseSource(str)
-	if !ok {
-		return 0, fmt.Errorf("unrecognized source value: %q", str)
-	}
-
-	return source, nil
 }

@@ -1,4 +1,4 @@
-package pgcr
+package bungie
 
 type RaidName string
 

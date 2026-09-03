@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"pgcr-processing-service/internal/db"
-	"pgcr-processing-service/internal/types/pgcr"
+	"pgcr-processing-service/internal/types/bungie"
 )
 
 type fakeMapper struct {
@@ -13,15 +13,15 @@ type fakeMapper struct {
 }
 
 // PgcrToPgcrInfo implements [mapper.Mapper].
-func (f *fakeMapper) PgcrToPgcrInfo(context.Context, *pgcr.PostGameCarnageReport) (*pgcr.PgcrInfo, error) {
+func (f *fakeMapper) PgcrToPgcrInfo(context.Context, *bungie.PostGameCarnageReport) (*bungie.PgcrInfo, error) {
 	if f.shouldErr {
 		return nil, fmt.Errorf("Error while mapping pgcr to pgcrInfo")
 	}
-	return &pgcr.PgcrInfo{}, nil
+	return &bungie.PgcrInfo{}, nil
 }
 
 // WeaponInfoToDBEntity implements [mapper.Mapper].
-func (f *fakeMapper) WeaponInfoToDBEntity(context.Context, *pgcr.WeaponInfo) (db.CreateWeaponParams, error) {
+func (f *fakeMapper) WeaponInfoToDBEntity(context.Context, *bungie.WeaponInfo) (db.CreateWeaponParams, error) {
 	if f.shouldErr {
 		return db.CreateWeaponParams{}, fmt.Errorf("Error while mapping WeaponInfo to DB entity")
 	}

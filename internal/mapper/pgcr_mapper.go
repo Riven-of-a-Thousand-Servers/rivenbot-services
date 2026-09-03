@@ -2,6 +2,7 @@ package mapper
 
 import (
 	"context"
+	"database/sql"
 	"log/slog"
 	"math"
 	"strconv"
@@ -10,8 +11,8 @@ import (
 	"pgcr-processing-service/internal/cache"
 	"pgcr-processing-service/internal/compress"
 	"pgcr-processing-service/internal/db"
+	"pgcr-processing-service/internal/types/bungie"
 	"pgcr-processing-service/internal/types/manifest"
-	"pgcr-processing-service/internal/types/pgcr"
 )
 
 // Pgcr maps fields from the Raw PGCR json fields to equivalent database entities
@@ -29,8 +30,55 @@ const (
 	pstTimezone string = "America/Los_Angeles"
 )
 
+func (m *DbMapper) MapToDestinyPlayers(pgcr bungie.PostGameCarnageReport) ([]db.CreateDestinyPlayerParams, error) {
+	players := getUniquePlayers(pgcr)
+	entities := make([]db.CreateDestinyPlayerParams, len(players))
+	for _, player := range players {
+		membershipId, err := strconv.ParseInt(player.MembershipId, 10, 64)
+		if err != nil {
+			slog.Error("Failed to parse membershipId to int64", "membershipId", player.MembershipId, "pgcr", pgcr.ActivityDetails.InstanceId, "error", err)
+			return nil, err
+		}
+
+		entity := db.CreateDestinyPlayerParams{
+			MembershipID:   membershipId,
+			MembershipType: int32(player.MembershipType),
+			IsPublic:       sql.NullBool{Bool: player.IsPublic, Valid: true},
+			IconPath:       sql.NullString{String: player.IconPath, Valid: player.IconPath != ""},
+			DisplayName:    sql.NullString{String: player.DisplayName, Valid: player.DisplayName != ""},
+		}
+		if player.BungieGlobalDisplayName != "" {
+			entity.DisplayName = sql.NullString{String: player.BungieGlobalDisplayName, Valid: player.BungieGlobalDisplayName != ""}
+		} else {
+			entity.DisplayName = sql.NullString{String: player.DisplayName, Valid: player.DisplayName != ""}
+		}
+
+		if player.BungieGlobalDisplayNameCode != 0 {
+			entity.GlobalDisplayNameCode = sql.NullInt32{
+				Int32: int32(player.BungieGlobalDisplayNameCode),
+				Valid: player.BungieGlobalDisplayNameCode != 0,
+			}
+		}
+
+		entities = append(entities, entity)
+	}
+
+	return entities, nil
+}
+
+func getUniquePlayers(pgcr bungie.PostGameCarnageReport) map[string]bungie.DestinyUserEntry {
+	players := make(map[string]bungie.DestinyUserEntry)
+	for _, entry := range pgcr.Entries {
+		if _, ok := players[entry.Player.DestinyUserInfo.MembershipId]; !ok {
+			players[entry.Player.DestinyUserInfo.MembershipId] = entry.Player.DestinyUserInfo
+		}
+	}
+
+	return players
+}
+
 // Compresses the PostGameCarnageReport and returns the associated DB entity
-func (m *DbMapper) MapToBlobObject(pgcr pgcr.PostGameCarnageReport) (db.CreatePgcrParams, error) {
+func (m *DbMapper) MapToBlobObject(pgcr bungie.PostGameCarnageReport) (db.CreatePgcrParams, error) {
 	var params db.CreatePgcrParams
 	raw, err := compress.Gzip(pgcr)
 	if err != nil {
@@ -44,7 +92,7 @@ func (m *DbMapper) MapToBlobObject(pgcr pgcr.PostGameCarnageReport) (db.CreatePg
 
 // Fetches all weapon definitions from a PGCR from all players into the its corresponding
 // database entities
-func (m *DbMapper) MapToDBWeapons(ctx context.Context, pgcr pgcr.PostGameCarnageReport) ([]db.CreateWeaponParams, error) {
+func (m *DbMapper) MapToDBWeapons(ctx context.Context, pgcr bungie.PostGameCarnageReport) ([]db.CreateWeaponParams, error) {
 	var weps []db.CreateWeaponParams
 	for _, entry := range pgcr.Entries {
 		for _, weapon := range entry.Extended.Weapons {
@@ -82,8 +130,8 @@ func (m *DbMapper) MapToDBWeapons(ctx context.Context, pgcr pgcr.PostGameCarnage
 	return weps, nil
 }
 
-func (m *DbMapper) PgcrToPgcrInfo(ctx context.Context, report *pgcr.PostGameCarnageReport) (*pgcr.PgcrInfo, error) {
-	entity := pgcr.PgcrInfo{
+func (m *DbMapper) PgcrToPgcrInfo(ctx context.Context, report *bungie.PostGameCarnageReport) (*bungie.PgcrInfo, error) {
+	entity := bungie.PgcrInfo{
 		ActivityHash: report.ActivityDetails.ActivityHash,
 	}
 
@@ -123,7 +171,7 @@ func (m *DbMapper) PgcrToPgcrInfo(ctx context.Context, report *pgcr.PostGameCarn
 		return nil, err
 	}
 
-	entity.RaidName, entity.RaidDifficulty, err = pgcr.GetRaidAndDifficulty(res.DisplayProperties.Name)
+	entity.RaidName, entity.RaidDifficulty, err = bungie.GetRaidAndDifficulty(res.DisplayProperties.Name)
 	if err != nil {
 		slog.Error("Unable to parse activity raid name and raid difficulty", "activityHash", entity.ActivityHash, "error", err)
 		return nil, err
@@ -160,8 +208,8 @@ Outerloop:
 	return &entity, nil
 }
 
-func groupPlayerByMembershipId(report *pgcr.PostGameCarnageReport) (map[int64][]pgcr.StatsEntry, error) {
-	groupedPlayers := make(map[int64][]pgcr.StatsEntry)
+func groupPlayerByMembershipId(report *bungie.PostGameCarnageReport) (map[int64][]bungie.StatsEntry, error) {
+	groupedPlayers := make(map[int64][]bungie.StatsEntry)
 	for _, entry := range report.Entries {
 		membershipId, err := strconv.ParseInt(entry.Player.DestinyUserInfo.MembershipId, 10, 64)
 		if err != nil {
@@ -171,7 +219,7 @@ func groupPlayerByMembershipId(report *pgcr.PostGameCarnageReport) (map[int64][]
 		if val, ok := groupedPlayers[membershipId]; ok {
 			groupedPlayers[membershipId] = append(val, entry)
 		} else {
-			groupedPlayers[membershipId] = []pgcr.StatsEntry{entry}
+			groupedPlayers[membershipId] = []bungie.StatsEntry{entry}
 		}
 	}
 	return groupedPlayers, nil
@@ -179,15 +227,15 @@ func groupPlayerByMembershipId(report *pgcr.PostGameCarnageReport) (map[int64][]
 
 // Takes in a map of grouped up PGCR entries by players' membershipIds and returns an array of PlayerInformation structs
 // Ensures that each player will have all their characters respectively
-func processPlayers(groups map[int64][]pgcr.StatsEntry) ([]pgcr.PlayerInfo, error) {
-	result := []pgcr.PlayerInfo{}
+func processPlayers(groups map[int64][]bungie.StatsEntry) ([]bungie.PlayerInfo, error) {
+	result := []bungie.PlayerInfo{}
 	for membershipId, entries := range groups {
 		if len(entries) == 0 {
 			slog.Info("Player with membershipId has no entries, skipping", "MembershipId", membershipId)
 			continue
 		}
 
-		playerInfo := pgcr.PlayerInfo{
+		playerInfo := bungie.PlayerInfo{
 			MembershipId:          membershipId,
 			MembershipType:        entries[0].Player.DestinyUserInfo.MembershipType,
 			DisplayName:           entries[0].Player.DestinyUserInfo.DisplayName,
@@ -227,13 +275,13 @@ func processPlayers(groups map[int64][]pgcr.StatsEntry) ([]pgcr.PlayerInfo, erro
 // Create an individual player character info struct based on a stats entry
 // This utilizes Redis to fetch several pre-indexed manifest objects
 // If querying Redis fails then this method return an error
-func createPlayerCharacter(entry *pgcr.StatsEntry) (*pgcr.CharacterInfo, error) {
-	characterInfo := pgcr.CharacterInfo{
+func createPlayerCharacter(entry *bungie.StatsEntry) (*bungie.CharacterInfo, error) {
+	characterInfo := bungie.CharacterInfo{
 		ActivityCompleted: entry.Values.Completed == 1.0,
-		WeaponInfo:        []pgcr.WeaponInfo{}, // empty just in case the player didn't do anything in the activity
+		WeaponInfo:        []bungie.WeaponInfo{}, // empty just in case the player didn't do anything in the activity
 	}
 
-	class := pgcr.CharacterClass(entry.Player.CharacterClass)
+	class := bungie.CharacterClass(entry.Player.CharacterClass)
 
 	characterId, err := strconv.ParseInt(entry.CharacterId, 10, 64)
 	if err != nil {
@@ -255,7 +303,7 @@ func createPlayerCharacter(entry *pgcr.StatsEntry) (*pgcr.CharacterInfo, error) 
 	// Set weapon information
 	if entry.Extended != nil {
 		for _, weapon := range entry.Extended.Weapons {
-			w := pgcr.WeaponInfo{
+			w := bungie.WeaponInfo{
 				WeaponHash:     weapon.ReferenceId,
 				Kills:          int(weapon.Values.WeaponKills),
 				PrecisionKills: int(weapon.Values.PrecisionKills),
@@ -265,7 +313,7 @@ func createPlayerCharacter(entry *pgcr.StatsEntry) (*pgcr.CharacterInfo, error) 
 		}
 
 		// Set ability information
-		abilityInfo := pgcr.AbilityInfo{
+		abilityInfo := bungie.AbilityInfo{
 			GrenadeKills: int(entry.Extended.Abilities.GrenadeKills),
 			MeleeKills:   int(entry.Extended.Abilities.MeleeKills),
 			SuperKills:   int(entry.Extended.Abilities.SuperKills),
@@ -276,7 +324,7 @@ func createPlayerCharacter(entry *pgcr.StatsEntry) (*pgcr.CharacterInfo, error) 
 }
 
 // Resolves if a raid was fresh or not, courtesy of @Newo
-func resolveFromBeginning(pgcr *pgcr.PostGameCarnageReport, flawless bool) (*bool, error) {
+func resolveFromBeginning(pgcr *bungie.PostGameCarnageReport, flawless bool) (*bool, error) {
 	var result *bool = new(bool)
 
 	startTime, err := time.Parse(time.RFC3339, pgcr.Period)

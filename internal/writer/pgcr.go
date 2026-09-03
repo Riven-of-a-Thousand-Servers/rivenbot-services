@@ -4,16 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strconv"
-	"time"
 
 	"pgcr-processing-service/internal/db"
 	"pgcr-processing-service/internal/mapper"
-	"pgcr-processing-service/internal/types/pgcr"
-	pgcrs "pgcr-processing-service/internal/types/pgcr"
-	types "pgcr-processing-service/internal/types/processor"
+	"pgcr-processing-service/internal/types/bungie"
+	pgcrs "pgcr-processing-service/internal/types/bungie"
 )
 
 type PgcrProcessor struct {
@@ -39,150 +36,86 @@ func NewPgcrProcessor(db *sql.DB,
 // 2. Destiny Player data
 // 3. Weapon Information
 // 4. Instance Information
-func (p *PgcrProcessor) Write(ctx context.Context, pgcr pgcr.PostGameCarnageReport) error {
+func (w *PgcrProcessor) Write(ctx context.Context, pgcr bungie.PostGameCarnageReport) error {
+	instanceId := pgcr.ActivityDetails.InstanceId
 	slog.Info("Processing pgcr", "pgcr", pgcr.ActivityDetails.InstanceId)
 
-	blob, err := p.mapper.MapToBlobObject(pgcr)
+	if err := w.saveBlob(ctx, pgcr); err != nil {
+		slog.Error("Failed to save blob", "pgcr", instanceId, "error", err)
+		return err
+	}
+
+	if err := w.savePlayers(ctx, pgcr); err != nil {
+		slog.Error("Failed to save destiny 2 players", "pgcr", instanceId, "error", err)
+	}
+
+	if err := w.saveWeapons(ctx, pgcr); err != nil {
+		slog.Error("Failed to save weapons", "pgcr", instanceId, "error", err)
+		return err
+	}
+
+	if err := w.saveInstance(ctx, pgcr); err != nil {
+		slog.Error("Failed to save instance", "pgcr", instanceId, "error", err)
+		return err
+	}
+
+	slog.Info("Finished processing pgcr", "pgcr", pgcr.ActivityDetails.InstanceId)
+	return nil
+}
+
+func (w *PgcrProcessor) savePlayers(ctx context.Context, pgcr pgcrs.PostGameCarnageReport) error {
+	players, err := w.mapper.MapToDestinyPlayers(pgcr)
 	if err != nil {
 		return err
 	}
 
-	if p.queries.CreatePgcr(ctx, blob); err != nil {
-		return err
-	}
-
-	if err := p.saveWeapons(ctx, pgcr); err != nil {
-		return err
-	}
-
-	tx, err := p.db.BeginTx(ctx, nil)
-	if err != nil {
-		slog.Error("Failed to begin transaction", "error", err)
-		return err
-	}
-	defer tx.Rollback()
-
-	// TODO: Fix all this shit
-	err = p.Save(ctx, qtx, &pgcr)
-	if err != nil {
-		if markErr := p.LedgerMarkError(ctx, p.queries, pgcr.InstanceId, err); markErr != nil {
-			slog.Error("Failed to mark ledger entry as failed", "instanceId", pgcr.InstanceId, "error", err)
-			return markErr
+	for _, player := range players {
+		if _, err := w.queries.CreateDestinyPlayer(ctx, player); err != nil {
+			return err
 		}
-		slog.Error("Error processing pgcr into db", "instanceId", pgcr.InstanceId, "error", err)
-		return err
-	}
-
-	if err := tx.Commit(); err != nil {
-		if markErr := p.LedgerMarkError(ctx, p.queries, pgcr.InstanceId, err); markErr != nil {
-			slog.Error("Failed to mark ledger entry as failed", "instanceId", pgcr.InstanceId, "error", err)
-			return markErr
-		}
-		slog.Error("Failed to commit transaction", "instanceId", pgcr.InstanceId, "error", err)
-		return err
-	}
-
-	slog.Info("Finished processing pgcr", "InstanceId", pgcr.InstanceId)
-	if err := p.LedgerMarkSuccess(ctx, p.queries, pgcr.InstanceId); err != nil {
-		slog.Error("Failed to mark ledger entry as processed", "instanceId", pgcr.InstanceId, "error", err)
-		return err
 	}
 
 	return nil
 }
 
-func (p *PgcrProcessor) saveWeapons(ctx context.Context, pgcr pgcrs.PostGameCarnageReport) error {
-	tx, err := p.db.BeginTx(ctx, nil)
+func (w *PgcrProcessor) saveBlob(ctx context.Context, pgcr bungie.PostGameCarnageReport) error {
+	blob, err := w.mapper.MapToBlobObject(pgcr)
 	if err != nil {
 		return err
 	}
 
-	defer tx.Rollback()
+	return w.queries.CreatePgcr(ctx, blob)
+}
 
-	queries := p.queries.WithTx(tx)
-	weapons, err := p.mapper.MapToDBWeapons(ctx, pgcr)
+func (w *PgcrProcessor) saveWeapons(ctx context.Context, pgcr pgcrs.PostGameCarnageReport) error {
+	weapons, err := w.mapper.MapToDBWeapons(ctx, pgcr)
 	if err != nil {
 		return err
 	}
 
 	for _, weapon := range weapons {
-		if err := queries.CreateWeapon(ctx, weapon); err != nil {
+		if err := w.queries.CreateWeapon(ctx, weapon); err != nil {
 			slog.Error("Unable to save weapon", "weaponId", weapon.WeaponHash, "error", err)
 			continue
 		}
 	}
 
-	return tx.Commit()
-}
-
-func (p *PgcrProcessor) LedgerMarkSuccess(ctx context.Context, queries *db.Queries, instanceId int64) error {
-	return queries.UpdateLogEntryStatus(ctx, db.UpdateLogEntryStatusParams{
-		InstanceID: instanceId,
-		Status:     types.Success.String(),
-		Error:      sql.NullString{Valid: false},
-	})
-}
-
-func (p *PgcrProcessor) LedgerMarkError(ctx context.Context, queries *db.Queries, instanceId int64, cause error) error {
-	return queries.UpdateLogEntryStatus(ctx, db.UpdateLogEntryStatusParams{
-		InstanceID: instanceId,
-		Status:     types.Errored.String(),
-		Error:      sql.NullString{String: cause.Error(), Valid: cause.Error() != ""},
-	})
+	return nil
 }
 
 // Saves a processed pgcr to the Postgres DB
-func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcrs.PgcrInfo) error {
-	// If inserting to the ledger fails, skip inserting to the DB
-	entry, err := p.queries.CreateLogEntry(ctx, db.CreateLogEntryParams{
-		InstanceID: pgcr.InstanceId,
-		Status:     types.Started.String(),
-	})
+func (w *PgcrProcessor) saveInstance(ctx context.Context, pgcr bungie.PostGameCarnageReport) error {
+	instanceId := pgcr.ActivityDetails.InstanceId
+	tx, err := w.db.BeginTx(ctx, nil)
 	if err != nil {
-		slog.Error("Failed to insert to ingestion log", "instanceId", pgcr.InstanceId, "error", err)
+		slog.Error("Unable to create transaction for instance", "pgcr", instanceId, "error", err)
 		return err
 	}
+	defer tx.Rollback()
 
-	status, ok := types.ParseStatus(entry.Status)
-	if !ok {
-		slog.Error("Unable to parse status", "value", entry.Status)
-		return fmt.Errorf("Unknown status: %s", entry.Status)
-	}
-
-	switch status {
-	case types.Success:
-		slog.Info("Instance already processed successfully, skipping", "instanceId", pgcr.InstanceId, "processedAt", entry.FirstSeenAt.String())
-		return nil
-	case types.Errored:
-		slog.Warn("Retrying previously failed instance", "instanceId", pgcr.InstanceId)
-	case types.Processing:
-		if time.Since(entry.LastAttemptAt) > types.StaleThreshold {
-			slog.Warn("Reclaiming stale processing entry", "instanceId", pgcr.InstanceId)
-		} else {
-			slog.Info("Instance actively being processed elsewhere, skipping", "instanceId", pgcr.InstanceId)
-			return nil
-		}
-	case types.Started:
-	}
-
-	claimed, err := p.queries.ClaimLogEntryForProcessing(ctx, db.ClaimLogEntryForProcessingParams{
-		InstanceID: pgcr.InstanceId,
-		Status:     entry.Status,
-	})
-
-	if errors.Is(err, sql.ErrNoRows) {
-		slog.Debug("Lost the claim race, skipping", "instanceId", pgcr.InstanceId)
-		return nil
-	}
-
-	if err != nil {
-		slog.Error("Failed to claim ingestion entry", "instanceId", pgcr.InstanceId)
-		return err
-	}
-	_ = claimed
-
+	qtx := w.queries.WithTx(tx)
 	if err := qtx.CreateInstance(ctx, db.CreateInstanceParams{
-		ID:              pgcr.InstanceId,
+		ID:              pgcr.ActivityDetails.InstanceId.Int64(),
 		ActivityHash:    pgcr.ActivityHash,
 		IsFresh:         pgcr.FromBeginning,
 		Flawless:        pgcr.Flawless,
@@ -191,19 +124,9 @@ func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcrs.P
 		EndTime:         pgcr.EndTime,
 		DurationSeconds: int32(pgcr.EndTime.Sub(pgcr.StartTime).Seconds()),
 	}); err != nil {
-		slog.Error("Failed to save instance to db", "instanceId", pgcr.InstanceId, "error", err)
+		slog.Error("Failed to save instance to db", "instanceId", pgcr.ActivityDetails.InstanceId, "error", err)
 		return err
 	}
-
-	// TODO: this should be a separate step outside of the main transaction
-	//
-	// if err := qtx.CreatePgcr(ctx, db.CreatePgcrParams{
-	// 	InstanceID: pgcr.InstanceId,
-	// 	Blob:       b,
-	// }); err != nil {
-	// 	slog.Error("Failed to save raw pgcr instance", "instanceId", pgcr.InstanceId, "error", err)
-	// 	return err
-	// }
 
 	// Player
 	for _, pi := range pgcr.PlayerInfo {
@@ -229,13 +152,13 @@ func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcrs.P
 
 		_, err := qtx.CreateDestinyPlayer(ctx, player)
 		if err != nil {
-			slog.Error("Failed to save destiny player", "instanceId", pgcr.InstanceId, "membershipId", player.MembershipID, "membershipType", player.MembershipType)
+			slog.Error("Failed to save destiny player", "instanceId", pgcr.ActivityDetails.InstanceId, "membershipId", player.MembershipID, "membershipType", player.MembershipType)
 			return err
 		}
 
 		// InstancePlayer
 		err = qtx.CreateInstancePlayer(ctx, db.CreateInstancePlayerParams{
-			InstanceID:        pgcr.InstanceId,
+			InstanceID:        pgcr.ActivityDetails.InstanceId,
 			MembershipID:      pi.MembershipId,
 			Completed:         sql.NullBool{Bool: pi.Completed},
 			TimePlayedSeconds: pi.TimePlayedSeconds,
@@ -253,17 +176,17 @@ func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcrs.P
 				return err
 			}
 		case errors.Is(err, sql.ErrNoRows):
-			slog.Info("destiny_player already recorded, skipping player entirely", "instanceId", pgcr.InstanceId, "membershipId", pi.MembershipId)
+			slog.Info("destiny_player already recorded, skipping player entirely", "instanceId", pgcr.ActivityDetails.InstanceId, "membershipId", pi.MembershipId)
 			continue
 		default:
-			slog.Error("Failed to save destiny_player", "instanceId", pgcr.InstanceId, "membershipId", pi.MembershipId)
+			slog.Error("Failed to save destiny_player", "instanceId", pgcr.ActivityDetails.InstanceId, "membershipId", pi.MembershipId)
 			return err
 		}
 
 		// InstanceCharacter
 		for _, ci := range pi.CharacterInfo {
 			if err := qtx.CreateInstanceCharacter(ctx, db.CreateInstanceCharacterParams{
-				InstanceID:   pgcr.InstanceId,
+				InstanceID:   pgcr.ActivityDetails.InstanceId,
 				MembershipID: pi.MembershipId,
 				CharacterID:  ci.CharacterId,
 				EmblemHash:   ci.CharacterEmblem,
@@ -278,14 +201,14 @@ func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcrs.P
 				GrenadeKills: int32(ci.AbilityInfo.GrenadeKills),
 				MeleeKills:   int32(ci.AbilityInfo.MeleeKills),
 			}); err != nil {
-				slog.Error("Failed to save instance character", "instanceId", pgcr.InstanceId, "membershipId", player.MembershipID, "membershipType", player.MembershipType, "characterId", ci.CharacterId)
+				slog.Error("Failed to save instance character", "instanceId", pgcr.ActivityDetails.InstanceId, "membershipId", player.MembershipID, "membershipType", player.MembershipType, "characterId", ci.CharacterId)
 				return err
 			}
 
 			for _, ciw := range ci.WeaponInfo {
 				// Weapons
 				strHash := strconv.FormatInt(ciw.WeaponHash, 10)
-				params, err := p.mapper.WeaponInfoToDBEntity(ctx, &ciw)
+				params, err := w.mapper.WeaponInfoToDBEntity(ctx, &ciw)
 				if err != nil {
 					slog.Error("Failed to map weapon to db entity", "hash", strHash, "error", err)
 					return err
@@ -293,14 +216,14 @@ func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcrs.P
 
 				// Weapons should not be made as part of the whole transaction due to many
 				// raids having similar weapon setups, this makes deadlocks be a regular ocurrance
-				if err := p.queries.CreateWeapon(ctx, params); err != nil {
+				if err := w.queries.CreateWeapon(ctx, params); err != nil {
 					slog.Error("Failed to save weapon", "weaponId", strHash, "error", err)
 					return err
 				}
 
 				// InstanceCharacterWeapons
 				if err := qtx.CreateInstanceCharacterWeapon(ctx, db.CreateInstanceCharacterWeaponParams{
-					InstanceID:         pgcr.InstanceId,
+					InstanceID:         pgcr.ActivityDetails.InstanceId,
 					PlayerMembershipID: pi.MembershipId,
 					PlayerCharacterID:  ci.CharacterId,
 					WeaponID:           ciw.WeaponHash,
@@ -309,7 +232,7 @@ func (p *PgcrProcessor) Save(ctx context.Context, qtx *db.Queries, pgcr *pgcrs.P
 					PrecisionRatio:     strconv.FormatFloat(float64(ciw.PrecisionRatio), 'f', -1, 64),
 				}); err != nil {
 
-					slog.Error("Failed to save instance character", "instanceId", pgcr.InstanceId, "membershipId", player.MembershipID, "membershipType", player.MembershipType, "characterId", ci.CharacterId, "weaponId", strHash)
+					slog.Error("Failed to save instance character", "instanceId", pgcr.ActivityDetails.InstanceId, "membershipId", player.MembershipID, "membershipType", player.MembershipType, "characterId", ci.CharacterId, "weaponId", strHash)
 					return err
 				}
 			}

@@ -19,9 +19,8 @@ import (
 	"pgcr-processing-service/internal/mapper"
 	"pgcr-processing-service/internal/pubsub"
 	ui "pgcr-processing-service/internal/tui"
-	"pgcr-processing-service/internal/types/dataset"
+	"pgcr-processing-service/internal/types/bungie"
 	"pgcr-processing-service/internal/types/manifest"
-	"pgcr-processing-service/internal/types/pgcr"
 	"pgcr-processing-service/internal/writer"
 
 	"pgcr-processing-service/internal/pipeline"
@@ -117,10 +116,10 @@ dataset`,
 			}
 
 			mapper := mapper.New(cache)
-			var w chainmorph.ItemWriter[pgcr.PostGameCarnageReport]
+			var w chainmorph.ItemWriter[bungie.PostGameCarnageReport]
 			switch {
 			case opts.Noop:
-				w = writer.NoOpProcessor[pgcr.PostGameCarnageReport]()
+				w = writer.NoOpProcessor[bungie.PostGameCarnageReport]()
 			default:
 				conn, err := db.Connect(groupCtx, opts.DbUrl)
 				if err != nil {
@@ -153,7 +152,7 @@ dataset`,
 					chReader := pipeline.NewChannelReader(ch)
 					return chainmorph.From(chReader).
 						MapFunc(pipeline.MapRawPgcr).
-						If(func(item pgcr.PostGameCarnageReport) bool {
+						If(func(item bungie.PostGameCarnageReport) bool {
 							// ~ Magic number time ~
 							// I havent' had time to write the consts for game modes =(
 							// All you need to know is Raids in Bungie API are Mode = 4

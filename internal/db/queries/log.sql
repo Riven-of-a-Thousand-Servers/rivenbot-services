@@ -1,10 +1,7 @@
 -- name: CreateLogEntry :one
 INSERT INTO ingestion_log (instance_id, source, status)
 VALUES ($1, $2, $3)
-ON CONFLICT (instance_id) DO UPDATE
-    SET
-        last_attempt_at = now(),
-        attempt_count = ingestion_log.attempt_count + 1
+ON CONFLICT (instance_id) DO NOTHING
 RETURNING *;
 
 -- name: UpdateLogEntryStatus :exec

@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"pgcr-processing-service/internal/types/bungie"
 	"pgcr-processing-service/internal/types/manifest"
-	"pgcr-processing-service/internal/types/pgcr"
 
 	"github.com/stretchr/testify/mock"
 )
@@ -19,7 +19,7 @@ func TestExtractInfo_ShouldWorkForAPIPgcr(t *testing.T) {
 		Return(manifest.Entry{DisplayProperties: manifest.DisplayProperties{Name: "Last Wish"}}, nil)
 
 	ctx := context.Background()
-	pgcr := openPgcr[pgcr.Response](t, "beyond_light_pgcr.json")
+	pgcr := openPgcr[bungie.Response](t, "beyond_light_pgcr.json")
 	sut := New(mockCache)
 
 	res, err := sut.PgcrToPgcrInfo(ctx, &pgcr.Response)
@@ -38,7 +38,7 @@ func TestExtractInfo_ShouldWorkForDatasetPgcr(t *testing.T) {
 		Return(manifest.Entry{DisplayProperties: manifest.DisplayProperties{Name: "Last Wish"}}, nil)
 
 	ctx := context.Background()
-	pgcr := openPgcr[pgcr.PostGameCarnageReport](t, "dataset_pgcr.json")
+	pgcr := openPgcr[bungie.PostGameCarnageReport](t, "dataset_pgcr.json")
 	sut := New(mockCache)
 
 	res, err := sut.PgcrToPgcrInfo(ctx, &pgcr)

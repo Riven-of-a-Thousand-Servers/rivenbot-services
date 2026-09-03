@@ -19,10 +19,10 @@ import (
 	"pgcr-processing-service/internal/cache"
 	"pgcr-processing-service/internal/db"
 	"pgcr-processing-service/internal/mapper"
-	"pgcr-processing-service/internal/process"
 	"pgcr-processing-service/internal/rabbitmq"
 	"pgcr-processing-service/internal/types/manifest"
 	"pgcr-processing-service/internal/utils"
+	"pgcr-processing-service/internal/writer"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/spf13/cobra"
@@ -57,10 +57,10 @@ func newProcessCommand() *cobra.Command {
 			defer rabbitmq.Conn.Close()
 
 			// Switch if Noop is passed in
-			var processor *process.NoopProcessor[json.RawMessage]
+			var processor *writer.NoopProcessor[json.RawMessage]
 			switch {
 			case opts.Noop:
-				processor = process.NoOpProcessor[json.RawMessage]()
+				processor = writer.NoOpProcessor[json.RawMessage]()
 			default:
 				// Check for docker secret notation, e.g., /run/secret/${my_secret}
 				if strings.HasPrefix(opts.DatasourceUrl, "/") {
@@ -96,10 +96,8 @@ func newProcessCommand() *cobra.Command {
 
 				mapper := mapper.New(redisCache)
 
-				processor = process.NewPgcrProcessor(conn, queries, mapper)
+				processor = writer.NewPgcrProcessor(conn, queries, mapper)
 			}
-
-			worker := runner.NewWorker(processor, rabbitmq)
 
 			return runProcessor(cmd.Context(), worker, opts.Concurrency)
 		},
