@@ -13,18 +13,18 @@ import (
 	pgcrs "pgcr-processing-service/internal/types/bungie"
 )
 
-type PgcrProcessor struct {
+type PgcrWriter struct {
 	db      *sql.DB
 	queries *db.Queries
 	mapper  *mapper.DbMapper
 }
 
 // Full Processor with RabbitMQ as an extra dependency
-func NewPgcrProcessor(db *sql.DB,
+func NewPgcrWriter(db *sql.DB,
 	queries *db.Queries,
 	mapper *mapper.DbMapper,
-) *PgcrProcessor {
-	return &PgcrProcessor{
+) *PgcrWriter {
+	return &PgcrWriter{
 		db:      db,
 		queries: queries,
 		mapper:  mapper,
@@ -36,7 +36,7 @@ func NewPgcrProcessor(db *sql.DB,
 // 2. Destiny Player data
 // 3. Weapon Information
 // 4. Instance Information
-func (w *PgcrProcessor) Write(ctx context.Context, pgcr bungie.PostGameCarnageReport) error {
+func (w *PgcrWriter) Write(ctx context.Context, pgcr bungie.PostGameCarnageReport) error {
 	instanceId := pgcr.ActivityDetails.InstanceId
 	slog.Info("Processing pgcr", "pgcr", pgcr.ActivityDetails.InstanceId)
 
@@ -63,7 +63,7 @@ func (w *PgcrProcessor) Write(ctx context.Context, pgcr bungie.PostGameCarnageRe
 	return nil
 }
 
-func (w *PgcrProcessor) savePlayers(ctx context.Context, pgcr pgcrs.PostGameCarnageReport) error {
+func (w *PgcrWriter) savePlayers(ctx context.Context, pgcr pgcrs.PostGameCarnageReport) error {
 	players, err := w.mapper.MapToDestinyPlayers(pgcr)
 	if err != nil {
 		return err
@@ -78,7 +78,7 @@ func (w *PgcrProcessor) savePlayers(ctx context.Context, pgcr pgcrs.PostGameCarn
 	return nil
 }
 
-func (w *PgcrProcessor) saveBlob(ctx context.Context, pgcr bungie.PostGameCarnageReport) error {
+func (w *PgcrWriter) saveBlob(ctx context.Context, pgcr bungie.PostGameCarnageReport) error {
 	blob, err := w.mapper.MapToBlobObject(pgcr)
 	if err != nil {
 		return err
@@ -87,7 +87,7 @@ func (w *PgcrProcessor) saveBlob(ctx context.Context, pgcr bungie.PostGameCarnag
 	return w.queries.CreatePgcr(ctx, blob)
 }
 
-func (w *PgcrProcessor) saveWeapons(ctx context.Context, pgcr pgcrs.PostGameCarnageReport) error {
+func (w *PgcrWriter) saveWeapons(ctx context.Context, pgcr pgcrs.PostGameCarnageReport) error {
 	weapons, err := w.mapper.MapToDBWeapons(ctx, pgcr)
 	if err != nil {
 		return err
@@ -104,7 +104,7 @@ func (w *PgcrProcessor) saveWeapons(ctx context.Context, pgcr pgcrs.PostGameCarn
 }
 
 // Saves a processed pgcr to the Postgres DB
-func (w *PgcrProcessor) saveInstance(ctx context.Context, pgcr bungie.PostGameCarnageReport) error {
+func (w *PgcrWriter) saveInstance(ctx context.Context, pgcr bungie.PostGameCarnageReport) error {
 	instanceId := pgcr.ActivityDetails.InstanceId
 	tx, err := w.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -114,48 +114,21 @@ func (w *PgcrProcessor) saveInstance(ctx context.Context, pgcr bungie.PostGameCa
 	defer tx.Rollback()
 
 	qtx := w.queries.WithTx(tx)
-	if err := qtx.CreateInstance(ctx, db.CreateInstanceParams{
-		ID:              pgcr.ActivityDetails.InstanceId.Int64(),
-		ActivityHash:    pgcr.ActivityHash,
-		IsFresh:         pgcr.FromBeginning,
-		Flawless:        pgcr.Flawless,
-		PlayerCount:     int32(len(pgcr.PlayerInfo)),
-		StartTime:       pgcr.StartTime,
-		EndTime:         pgcr.EndTime,
-		DurationSeconds: int32(pgcr.EndTime.Sub(pgcr.StartTime).Seconds()),
-	}); err != nil {
+
+	instance, err := w.mapper.MapToDBInstance(pgcr)
+	if err != nil {
+		slog.Error("Failed to map to DB instance", "pgcr", instanceId, "error", err)
+		return err
+	}
+
+	if err := qtx.CreateInstance(ctx, instance); err != nil {
 		slog.Error("Failed to save instance to db", "instanceId", pgcr.ActivityDetails.InstanceId, "error", err)
 		return err
 	}
 
-	// Player
+	// TODO: Map player information to their DB equivalent
+	// hopefully get rid of the intermediate PgcrInfo struct soon
 	for _, pi := range pgcr.PlayerInfo {
-		player := db.CreateDestinyPlayerParams{
-			MembershipID:   pi.MembershipId,
-			MembershipType: int32(pi.MembershipType),
-			IsPublic:       sql.NullBool{Bool: pi.IsPublic, Valid: true},
-			IconPath:       sql.NullString{String: pi.IconPath, Valid: pi.IconPath != ""},
-		}
-
-		if pi.GlobalDisplayName != "" {
-			player.DisplayName = sql.NullString{String: pi.GlobalDisplayName, Valid: pi.GlobalDisplayName != ""}
-		} else {
-			player.DisplayName = sql.NullString{String: pi.DisplayName, Valid: pi.DisplayName != ""}
-		}
-
-		if pi.GlobalDisplayNameCode != 0 {
-			player.GlobalDisplayNameCode = sql.NullInt32{
-				Int32: int32(pi.GlobalDisplayNameCode),
-				Valid: pi.GlobalDisplayNameCode != 0,
-			}
-		}
-
-		_, err := qtx.CreateDestinyPlayer(ctx, player)
-		if err != nil {
-			slog.Error("Failed to save destiny player", "instanceId", pgcr.ActivityDetails.InstanceId, "membershipId", player.MembershipID, "membershipType", player.MembershipType)
-			return err
-		}
-
 		// InstancePlayer
 		err = qtx.CreateInstancePlayer(ctx, db.CreateInstancePlayerParams{
 			InstanceID:        pgcr.ActivityDetails.InstanceId,

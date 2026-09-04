@@ -19,11 +19,13 @@ import (
 	"pgcr-processing-service/internal/cache"
 	"pgcr-processing-service/internal/db"
 	"pgcr-processing-service/internal/mapper"
+	"pgcr-processing-service/internal/pipeline"
 	"pgcr-processing-service/internal/rabbitmq"
 	"pgcr-processing-service/internal/types/manifest"
 	"pgcr-processing-service/internal/utils"
 	"pgcr-processing-service/internal/writer"
 
+	"github.com/deahtstroke/chainmorph"
 	"github.com/redis/go-redis/v9"
 	"github.com/spf13/cobra"
 )
@@ -57,7 +59,7 @@ func newProcessCommand() *cobra.Command {
 			defer rabbitmq.Conn.Close()
 
 			// Switch if Noop is passed in
-			var processor *writer.NoopProcessor[json.RawMessage]
+			var processor chainmorph.ItemWriter[json.RawMessage]
 			switch {
 			case opts.Noop:
 				processor = writer.NoOpProcessor[json.RawMessage]()
@@ -96,10 +98,17 @@ func newProcessCommand() *cobra.Command {
 
 				mapper := mapper.New(redisCache)
 
-				processor = writer.NewPgcrProcessor(conn, queries, mapper)
+				_ = writer.NewPgcrWriter(conn, queries, mapper)
 			}
 
-			return runProcessor(cmd.Context(), worker, opts.Concurrency)
+			ch, err := rabbitmq.Consume(ctx)
+			if err != nil {
+				slog.Error("Error while starting consumer process", "error", err)
+				os.Exit(1)
+			}
+			reader := pipeline.NewChannelReader(ch)
+			err = chainmorph.From(reader).
+				MapFunc(pipeline.MapRawPgcr)
 		},
 	}
 

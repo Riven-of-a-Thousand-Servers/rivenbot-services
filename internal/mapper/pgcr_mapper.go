@@ -13,6 +13,8 @@ import (
 	"pgcr-processing-service/internal/db"
 	"pgcr-processing-service/internal/types/bungie"
 	"pgcr-processing-service/internal/types/manifest"
+
+	"github.com/golang/protobuf/ptypes/duration"
 )
 
 // Pgcr maps fields from the Raw PGCR json fields to equivalent database entities
@@ -130,6 +132,38 @@ func (m *DbMapper) MapToDBWeapons(ctx context.Context, pgcr bungie.PostGameCarna
 	return weps, nil
 }
 
+func (m *DbMapper) MapToDBInstance(pgcr bungie.PostGameCarnageReport) (db.CreateInstanceParams, error) {
+	startTime, err := time.Parse(time.RFC3339, pgcr.Period)
+	isFlawless := isFlawless(pgcr)
+	isFresh, err := isFresh(&pgcr, isFlawless)
+	if err != nil {
+		return db.CreateInstanceParams{}, err
+	}
+
+	var maxDuration float64 = 0
+	for _, e := range pgcr.Entries {
+		maxDuration = math.Max(float64(maxDuration), float64(e.Values.ActivityDurationSeconds))
+	}
+
+	endTime := startTime.Add(time.Second * time.Duration(maxDuration))
+
+	groups, err := groupPlayerByMembershipId(&pgcr)
+	if err != nil {
+		return db.CreateInstanceParams{}, err
+	}
+
+	return db.CreateInstanceParams{
+		ID:              pgcr.ActivityDetails.InstanceId.Int64(),
+		ActivityHash:    pgcr.ActivityDetails.ActivityHash,
+		IsFresh:         *isFresh,
+		Flawless:        isFlawless,
+		PlayerCount:     int32(len(groups)),
+		StartTime:       startTime,
+		EndTime:         endTime,
+		DurationSeconds: int32(endTime.Sub(startTime).Seconds()),
+	}, nil
+}
+
 func (m *DbMapper) PgcrToPgcrInfo(ctx context.Context, report *bungie.PostGameCarnageReport) (*bungie.PgcrInfo, error) {
 	entity := bungie.PgcrInfo{
 		ActivityHash: report.ActivityDetails.ActivityHash,
@@ -194,7 +228,7 @@ Outerloop:
 		}
 	}
 
-	fresh, err := resolveFromBeginning(report, flawless)
+	fresh, err := isFresh(report, flawless)
 	if err != nil {
 		slog.Error("Failed to determine if PGCR is fresh", "InstanceId", entity.InstanceId, "Error", err)
 		return nil, err
@@ -323,19 +357,28 @@ func createPlayerCharacter(entry *bungie.StatsEntry) (*bungie.CharacterInfo, err
 	return &characterInfo, nil
 }
 
+func isFlawless(pgcr bungie.PostGameCarnageReport) bool {
+	for _, entry := range pgcr.Entries {
+		if entry.Values.Deaths > 0 {
+			return false
+		}
+	}
+	return true
+}
+
 // Resolves if a raid was fresh or not, courtesy of @Newo
-func resolveFromBeginning(pgcr *bungie.PostGameCarnageReport, flawless bool) (*bool, error) {
+func isFresh(pgcr *bungie.PostGameCarnageReport, flawless bool) (*bool, error) {
 	var result *bool = new(bool)
 
 	startTime, err := time.Parse(time.RFC3339, pgcr.Period)
 	if err != nil {
+		slog.Error("Failed to parse timestamp to determine isFresh", "pgcr", pgcr.ActivityDetails.InstanceId, "error", err)
 		return nil, err
 	}
 
 	if startTime.After(hauntedStart) || startTime.Equal(hauntedStart) {
 		return &pgcr.ActivityWasStartedFromBeginning, nil
 	} else if startTime.Before(beyondLightStart) {
-
 		isScourge := pgcr.ActivityDetails.ActivityHash == sotpHash1 || pgcr.ActivityDetails.ActivityHash == sotpHash2
 		isLeviathan := leviHashes[pgcr.ActivityDetails.ActivityHash]
 

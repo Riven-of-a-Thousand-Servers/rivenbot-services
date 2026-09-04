@@ -132,7 +132,7 @@ dataset`,
 					return err
 				}
 
-				w = writer.NewPgcrProcessor(conn, queries, mapper)
+				w = writer.NewPgcrWriter(conn, queries, mapper)
 			}
 
 			// setupEvents(ctx, &eventsWg, eventsCh, c)
