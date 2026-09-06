@@ -1,4 +1,4 @@
-package bungie
+package cache
 
 import (
 	"context"
@@ -8,16 +8,12 @@ import (
 	"log/slog"
 	"net/http"
 
-	"pgcr-processing-service/internal/cache"
 	"pgcr-processing-service/internal/types/manifest"
 )
 
-var (
-	manifestUrl  = "http://proxy:8081/Platform/Destiny2/Manifest/%s/%s/"
-	apiKeyHeader = "x-api-key"
-)
+var manifestUrl = "http://proxy:8081/Platform/Destiny2/Manifest/%s/%s/"
 
-func BungieManifestFetcher[T any](client *http.Client, apiKey string) cache.Fetcher[T] {
+func BungieManifestFetcher[T any](client *http.Client, apiKey string) Fetcher[T] {
 	return func(ctx context.Context, key string, entity manifest.EntityDefinition) (manifest.Response[T], error) {
 		var zero manifest.Response[T]
 

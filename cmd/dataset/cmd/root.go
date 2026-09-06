@@ -31,6 +31,12 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+const (
+	DatasetBrokerSize     = 48
+	EventThroughput       = 20_000
+	CacheEventsBrokerSize = 10
+)
+
 type datasetOpts struct {
 	RootDir    string
 	DbUrl      string
@@ -49,8 +55,6 @@ func newRootCommand() *cobra.Command {
 		Short: "Runs a one-off job to process PGCRs from the Asun ZSTD dataset to backfill database",
 		Long: `This command spins up several workers to backfill the Rivenbot database from the Asun
 dataset`,
-		// Uncomment the following line if your bare application
-		// has an action associated with it:
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			type cleanupFunc func() error
@@ -97,11 +101,12 @@ dataset`,
 
 			// setup events
 			var eventsWg sync.WaitGroup
-			eventsCh := make(chan tea.Msg, 20_000)
+			eventsCh := make(chan tea.Msg, EventThroughput)
 			go publishEventsToTea(groupCtx, program, eventsCh)
 
-			c := consumer.NewDatasetConsumer(files, 48, consumer.ConsumerOpts{NumFiles: opts.NumFiles, NumLines: opts.NumLines})
-			cache := cache.NewInMemoryCache[manifest.Entry](10)
+			c := consumer.NewDatasetConsumer(files, DatasetBrokerSize,
+				consumer.ConsumerOpts{NumFiles: opts.NumFiles, NumLines: opts.NumLines})
+			cache := cache.NewInMemoryCache[manifest.Entry](CacheEventsBrokerSize)
 			setupEvents(ctx, &eventsWg, eventsCh, cache)
 
 			// Prepopulate immediately before instantiating map
@@ -116,10 +121,10 @@ dataset`,
 			}
 
 			mapper := mapper.New(cache)
-			var w chainmorph.ItemWriter[bungie.PostGameCarnageReport]
+			var itemWriter chainmorph.ItemWriter[bungie.PostGameCarnageReport]
 			switch {
 			case opts.Noop:
-				w = writer.NoOpProcessor[bungie.PostGameCarnageReport]()
+				itemWriter = writer.NoOpProcessor[bungie.PostGameCarnageReport]()
 			default:
 				conn, err := db.Connect(groupCtx, opts.DbUrl)
 				if err != nil {
@@ -131,37 +136,23 @@ dataset`,
 				if err != nil {
 					return err
 				}
+				cleanup = append(cleanup, queries.Close)
 
-				w = writer.NewPgcrWriter(conn, queries, mapper)
+				itemWriter = writer.NewPgcrWriter(conn, queries, mapper)
 			}
-
-			// setupEvents(ctx, &eventsWg, eventsCh, c)
-			// setupEvents(ctx, &eventsWg, eventsCh, w)
-
-			cleanup = append(cleanup, func() error {
-				eventsWg.Wait()
-				return nil
-			})
 
 			ch, err := c.Consume(ctx)
 			if err != nil {
 				os.Exit(1)
 			}
+
 			for range opts.Goroutines {
 				g.Go(func() error {
 					chReader := pipeline.NewChannelReader(ch)
 					return chainmorph.From(chReader).
 						MapFunc(pipeline.MapRawPgcr).
-						If(func(item bungie.PostGameCarnageReport) bool {
-							// ~ Magic number time ~
-							// I havent' had time to write the consts for game modes =(
-							// All you need to know is Raids in Bungie API are Mode = 4
-							// see: https://bungie-net.github.io/multi/schema_Destiny-HistoricalStats-Definitions-DestinyActivityModeType.html#schema_Destiny-HistoricalStats-Definitions-DestinyActivityModeType
-							return item.ActivityDetails.Mode == 4
-						}).
-						// TODO: Figure out how to branch out several writes to DB
-						// based on the entity passed in, e.g., Weapons, Compressed Pgcr, Instance Activities, etc.
-						WriteTo(ctx, w)
+						If(pipeline.FilterByMode).
+						WriteTo(ctx, itemWriter)
 				})
 			}
 

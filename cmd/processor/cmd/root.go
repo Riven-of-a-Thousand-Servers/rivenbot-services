@@ -1,26 +1,22 @@
 /*
-Copyright © 2026 NAME HERE <EMAIL ADDRESS>
+Copyright © 2026 Daniel Villavicencio <dvm3099@pm.me>
 */
 package cmd
 
 import (
-	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
-	"os/signal"
 	"strings"
-	"sync"
-	"syscall"
 	"time"
 
-	"pgcr-processing-service/internal/bungie"
 	"pgcr-processing-service/internal/cache"
 	"pgcr-processing-service/internal/db"
 	"pgcr-processing-service/internal/mapper"
 	"pgcr-processing-service/internal/pipeline"
 	"pgcr-processing-service/internal/rabbitmq"
+	"pgcr-processing-service/internal/types/bungie"
 	"pgcr-processing-service/internal/types/manifest"
 	"pgcr-processing-service/internal/utils"
 	"pgcr-processing-service/internal/writer"
@@ -59,10 +55,10 @@ func newProcessCommand() *cobra.Command {
 			defer rabbitmq.Conn.Close()
 
 			// Switch if Noop is passed in
-			var processor chainmorph.ItemWriter[json.RawMessage]
+			var itemWriter chainmorph.ItemWriter[bungie.PostGameCarnageReport]
 			switch {
 			case opts.Noop:
-				processor = writer.NoOpProcessor[json.RawMessage]()
+				itemWriter = writer.NoOpProcessor[bungie.PostGameCarnageReport]()
 			default:
 				// Check for docker secret notation, e.g., /run/secret/${my_secret}
 				if strings.HasPrefix(opts.DatasourceUrl, "/") {
@@ -93,12 +89,12 @@ func newProcessCommand() *cobra.Command {
 					Protocol: 2,
 				})
 				defer redis.Close()
-				fetcher := bungie.BungieManifestFetcher[manifest.Entry](http.DefaultClient, opts.ApiKey)
+				fetcher := cache.BungieManifestFetcher[manifest.Entry](http.DefaultClient, opts.ApiKey)
 				redisCache := cache.New(redis, 12*time.Hour, fetcher)
 
 				mapper := mapper.New(redisCache)
 
-				_ = writer.NewPgcrWriter(conn, queries, mapper)
+				itemWriter = writer.NewPgcrWriter(conn, queries, mapper)
 			}
 
 			ch, err := rabbitmq.Consume(ctx)
@@ -108,7 +104,10 @@ func newProcessCommand() *cobra.Command {
 			}
 			reader := pipeline.NewChannelReader(ch)
 			err = chainmorph.From(reader).
-				MapFunc(pipeline.MapRawPgcr)
+				MapFunc(pipeline.MapRawPgcr).
+				WriteTo(ctx, itemWriter)
+
+			return err
 		},
 	}
 
@@ -122,28 +121,6 @@ func newProcessCommand() *cobra.Command {
 	flags.BoolVar(&opts.Noop, "noop", false, "Whether this processor will do something when consuming")
 
 	return rootCmd
-}
-
-func runProcessor(ctx context.Context, worker *runner.Worker[json.RawMessage], concurrency int) error {
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGQUIT)
-	defer cancel()
-
-	var wg sync.WaitGroup
-	for i := range concurrency {
-		wg.Go(func() {
-			slog.Info("Starting worker", "Id", i)
-			err := worker.Begin(ctx)
-			if err != nil {
-				slog.Error("Someting went wrong while processing", "error", err)
-				return
-			}
-			slog.Info("Shutting down worker", "Id", i)
-		})
-	}
-
-	wg.Wait()
-	slog.Info("All workers stopped, cleaning up resources")
-	return nil
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.

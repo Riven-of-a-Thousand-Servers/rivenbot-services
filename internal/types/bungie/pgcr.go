@@ -64,7 +64,7 @@ func (s *StringInt64) UnmarshalJSON(data []byte) error {
 
 type StatsEntry struct {
 	Player      PlayerEntry   `json:"player"`
-	CharacterId string        `json:"characterId"`
+	CharacterId StringInt64   `json:"characterId"`
 	Values      StatValues    `json:"values"`
 	Extended    *CarnageEntry `json:"extended"`
 }
@@ -83,6 +83,10 @@ type StatValues struct {
 }
 
 type StatValue float64
+
+func (s StatValue) String() string {
+	return strconv.FormatFloat(float64(s), 'f', -1, 64)
+}
 
 func (s *StatValue) UnmarshalJSON(data []byte) error {
 	var f float64

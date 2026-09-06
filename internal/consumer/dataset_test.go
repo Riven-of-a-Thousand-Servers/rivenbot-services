@@ -18,7 +18,7 @@ func TestStartShouldRunSuccesfully(t *testing.T) {
 		},
 	}
 	sut := NewDatasetConsumer(fileIdx, 12, ConsumerOpts{})
-	consumeCh := make(chan Delivery[dataset.Entry], 3)
+	consumeCh := make(chan Delivery[dataset.RawContent], 3)
 	sut.ch = consumeCh
 	subCh, unsub := sut.Subscribe()
 	defer unsub()
@@ -43,7 +43,7 @@ func TestLineLimitsShouldBeRespected(t *testing.T) {
 	sut := NewDatasetConsumer(fileIdx, 12, ConsumerOpts{
 		NumLines: 1,
 	})
-	consumeCh := make(chan Delivery[dataset.Entry], 3)
+	consumeCh := make(chan Delivery[dataset.RawContent], 3)
 	sut.ch = consumeCh
 	subCh, unsub := sut.Subscribe()
 	defer unsub()
@@ -73,7 +73,7 @@ func TestFileLimitsShouldBeRespected(t *testing.T) {
 	sut := NewDatasetConsumer(fileIdx, 12, ConsumerOpts{
 		NumFiles: 1,
 	})
-	consumeCh := make(chan Delivery[dataset.Entry], 3)
+	consumeCh := make(chan Delivery[dataset.RawContent], 3)
 	sut.ch = consumeCh
 	subCh, unsub := sut.Subscribe()
 	defer unsub()

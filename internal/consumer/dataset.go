@@ -27,7 +27,7 @@ type DatasetConsumer struct {
 	*pubsub.Broker[events.FileEvent]
 	FileIndex FileIndex
 	once      sync.Once
-	ch        chan Delivery[dataset.Entry]
+	ch        chan Delivery[dataset.RawContent]
 	numFiles  int
 	numLines  int
 }
@@ -41,9 +41,9 @@ func NewDatasetConsumer(idx FileIndex, brokerSize int, opts ConsumerOpts) *Datas
 	}
 }
 
-func (c *DatasetConsumer) Consume(ctx context.Context) (<-chan Delivery[dataset.Entry], error) {
+func (c *DatasetConsumer) Consume(ctx context.Context) (<-chan Delivery[dataset.RawContent], error) {
 	c.once.Do(func() {
-		c.ch = make(chan Delivery[dataset.Entry])
+		c.ch = make(chan Delivery[dataset.RawContent])
 		go c.Start(ctx)
 	})
 
@@ -137,15 +137,11 @@ ScanLoop:
 				break ScanLoop
 			}
 
-			payLoad := dataset.Entry{
-				Bytes:    scanner.Bytes(),
-				Filename: entry.Name,
-				RowsDone: lineCount + 1,
-			}
+			payload := dataset.RawContent(scanner.Bytes())
 
 			select {
-			case c.ch <- Delivery[dataset.Entry]{
-				Payload: payLoad,
+			case c.ch <- Delivery[dataset.RawContent]{
+				Payload: payload,
 				Ack: func() error {
 					return nil
 				},

@@ -13,8 +13,6 @@ import (
 	"pgcr-processing-service/internal/db"
 	"pgcr-processing-service/internal/types/bungie"
 	"pgcr-processing-service/internal/types/manifest"
-
-	"github.com/golang/protobuf/ptypes/duration"
 )
 
 // Pgcr maps fields from the Raw PGCR json fields to equivalent database entities
@@ -147,7 +145,7 @@ func (m *DbMapper) MapToDBInstance(pgcr bungie.PostGameCarnageReport) (db.Create
 
 	endTime := startTime.Add(time.Second * time.Duration(maxDuration))
 
-	groups, err := groupPlayerByMembershipId(&pgcr)
+	groups, err := groupByMembershipId(pgcr)
 	if err != nil {
 		return db.CreateInstanceParams{}, err
 	}
@@ -164,85 +162,108 @@ func (m *DbMapper) MapToDBInstance(pgcr bungie.PostGameCarnageReport) (db.Create
 	}, nil
 }
 
-func (m *DbMapper) PgcrToPgcrInfo(ctx context.Context, report *bungie.PostGameCarnageReport) (*bungie.PgcrInfo, error) {
-	entity := bungie.PgcrInfo{
-		ActivityHash: report.ActivityDetails.ActivityHash,
-	}
-
-	// Calculate start and end time
-	startTime, err := time.Parse(time.RFC3339, report.Period)
+func (m *DbMapper) MapToInstancePlayers(pgcr bungie.PostGameCarnageReport) ([]db.CreateInstancePlayerParams, error) {
+	var players []db.CreateInstancePlayerParams
+	groupedPlayers, err := groupByMembershipId(pgcr)
 	if err != nil {
-		slog.Error("Something went wrong when parsing the period for PGCR", "InstanceId", report.ActivityDetails.InstanceId, "Error", err)
 		return nil, err
 	}
 
-	if len(report.Entries) == 0 {
-		slog.Warn("No entries pgcr. Unable to determine activity duration", "pgcr", report.ActivityDetails.InstanceId)
+	for memId, toons := range groupedPlayers {
+		players = append(players, db.CreateInstancePlayerParams{
+			InstanceID:        pgcr.ActivityDetails.InstanceId.Int64(),
+			MembershipID:      memId,
+			TimePlayedSeconds: playerTimePlayed(toons),
+			Completed:         sql.NullBool{Bool: playerCompleted(toons), Valid: true},
+		})
 	}
 
-	// Get the max duration value for all players
-	var maxDuration float64 = 0
-	for _, e := range report.Entries {
-		maxDuration = math.Max(float64(maxDuration), float64(e.Values.ActivityDurationSeconds))
-	}
+	return players, nil
+}
 
-	endTime := startTime.Add(time.Second * time.Duration(maxDuration))
-
-	entity.StartTime = startTime
-	entity.EndTime = endTime
-
-	entity.InstanceId, err = strconv.ParseInt(string(report.ActivityDetails.InstanceId), 10, 64)
+func (m *DbMapper) MapToInstanceToons(pgcr bungie.PostGameCarnageReport) ([]db.CreateInstanceCharacterParams, error) {
+	var params []db.CreateInstanceCharacterParams
+	grouped, err := groupByMembershipId(pgcr)
 	if err != nil {
-		slog.Error("Unable to convert instanceIdto int64 for some reason?", "InstanceId", report.ActivityDetails.InstanceId)
 		return nil, err
 	}
 
-	res, err := m.manifestCache.Get(ctx,
-		strconv.FormatInt(entity.ActivityHash, 10),
-		manifest.ActivityDefinition)
+	instanceId := pgcr.ActivityDetails.InstanceId.Int64()
+	for memId, toons := range grouped {
+		dbToon := db.CreateInstanceCharacterParams{
+			InstanceID:   instanceId,
+			MembershipID: memId,
+		}
+
+		for _, toon := range toons {
+			dbToon.CharacterID = toon.CharacterId.Int64()
+			dbToon.Completed = toon.Values.Completed == 1.0
+			dbToon.ClassHash = toon.Player.ClassHash
+			dbToon.EmblemHash = toon.Player.EmblemHash
+			dbToon.Kills = int32(toon.Values.Kills)
+			dbToon.Deaths = int32(toon.Values.Kills)
+			dbToon.Assists = int32(toon.Values.Assists)
+			dbToon.Kda = toon.Values.Kda.String()
+			dbToon.Kdr = toon.Values.Kdr.String()
+			dbToon.Efficiency = int32(toon.Values.Efficiency)
+			dbToon.SuperKills = int32(toon.Extended.Abilities.SuperKills)
+			dbToon.GrenadeKills = int32(toon.Extended.Abilities.GrenadeKills)
+			dbToon.MeleeKills = int32(toon.Extended.Abilities.MeleeKills)
+		}
+
+		params = append(params, dbToon)
+	}
+	return params, nil
+}
+
+func (m *DbMapper) MapToInstanceToonWeapons(pgcr bungie.PostGameCarnageReport) ([]db.CreateInstanceCharacterWeaponParams, error) {
+	var weapons []db.CreateInstanceCharacterWeaponParams
+	grouped, err := groupByMembershipId(pgcr)
 	if err != nil {
-		slog.Error("Unable to find entity in cache", "instanceId", entity.InstanceId, "ActivityHash", report.ActivityDetails.ActivityHash, "Error", err)
 		return nil, err
 	}
 
-	entity.RaidName, entity.RaidDifficulty, err = bungie.GetRaidAndDifficulty(res.DisplayProperties.Name)
-	if err != nil {
-		slog.Error("Unable to parse activity raid name and raid difficulty", "activityHash", entity.ActivityHash, "error", err)
-		return nil, err
-	}
+	instanceId := pgcr.ActivityDetails.InstanceId
+	for memId, toons := range grouped {
+		for _, toon := range toons {
+			charWeapons := toon.Extended.Weapons
+			for _, weapon := range charWeapons {
+				wep := db.CreateInstanceCharacterWeaponParams{
+					InstanceID:         instanceId.Int64(),
+					PlayerMembershipID: memId,
+					PlayerCharacterID:  toon.CharacterId.Int64(),
+					WeaponID:           weapon.ReferenceId,
+					Kills:              int32(weapon.Values.WeaponKills),
+					PrecisionKills:     int32(weapon.Values.PrecisionKills),
+					PrecisionRatio:     weapon.Values.PrecisionRatio.String(),
+				}
 
-	groupedPlayers, err := groupPlayerByMembershipId(report)
-
-	if entity.PlayerInfo, err = processPlayers(groupedPlayers); err != nil {
-		return nil, err
-	}
-
-	flawless := true
-Outerloop:
-	for _, players := range groupedPlayers {
-		for _, player := range players {
-			if player.Values.Deaths > 0.0 {
-				flawless = false
-				break Outerloop
+				weapons = append(weapons, wep)
 			}
 		}
 	}
 
-	fresh, err := isFresh(report, flawless)
-	if err != nil {
-		slog.Error("Failed to determine if PGCR is fresh", "InstanceId", entity.InstanceId, "Error", err)
-		return nil, err
-	}
-
-	entity.Trio = len(groupedPlayers) == 3
-	entity.Duo = len(groupedPlayers) == 2
-	entity.Solo = len(groupedPlayers) == 1
-	entity.Flawless = flawless
-	entity.FromBeginning = *fresh
-	return &entity, nil
+	return weapons, nil
 }
 
-func groupPlayerByMembershipId(report *bungie.PostGameCarnageReport) (map[int64][]bungie.StatsEntry, error) {
+func playerTimePlayed(toons []bungie.StatsEntry) int32 {
+	var timePlayed int32
+	for _, toon := range toons {
+		timePlayed += int32(toon.Values.TimePlayedSeconds)
+	}
+	return timePlayed
+}
+
+func playerCompleted(toons []bungie.StatsEntry) bool {
+	for _, toon := range toons {
+		if toon.Values.Completed == 1.0 {
+			return true
+		}
+	}
+	return false
+}
+
+func groupByMembershipId(report bungie.PostGameCarnageReport) (map[int64][]bungie.StatsEntry, error) {
 	groupedPlayers := make(map[int64][]bungie.StatsEntry)
 	for _, entry := range report.Entries {
 		membershipId, err := strconv.ParseInt(entry.Player.DestinyUserInfo.MembershipId, 10, 64)
@@ -316,14 +337,7 @@ func createPlayerCharacter(entry *bungie.StatsEntry) (*bungie.CharacterInfo, err
 	}
 
 	class := bungie.CharacterClass(entry.Player.CharacterClass)
-
-	characterId, err := strconv.ParseInt(entry.CharacterId, 10, 64)
-	if err != nil {
-		slog.Error("Unable to parse character Id to int64", "CharacterId", entry.CharacterId)
-		return nil, err
-	}
-
-	characterInfo.CharacterId = characterId
+	characterInfo.CharacterId = entry.CharacterId.Int64()
 	characterInfo.LightLevel = entry.Player.LightLevel
 	characterInfo.CharacterClass = class
 	characterInfo.CharacterEmblem = entry.Player.EmblemHash

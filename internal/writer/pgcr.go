@@ -3,9 +3,7 @@ package writer
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"log/slog"
-	"strconv"
 
 	"pgcr-processing-service/internal/db"
 	"pgcr-processing-service/internal/mapper"
@@ -126,90 +124,56 @@ func (w *PgcrWriter) saveInstance(ctx context.Context, pgcr bungie.PostGameCarna
 		return err
 	}
 
-	// TODO: Map player information to their DB equivalent
-	// hopefully get rid of the intermediate PgcrInfo struct soon
-	for _, pi := range pgcr.PlayerInfo {
-		// InstancePlayer
-		err = qtx.CreateInstancePlayer(ctx, db.CreateInstancePlayerParams{
-			InstanceID:        pgcr.ActivityDetails.InstanceId,
-			MembershipID:      pi.MembershipId,
-			Completed:         sql.NullBool{Bool: pi.Completed},
-			TimePlayedSeconds: pi.TimePlayedSeconds,
-		})
+	instancePlayers, err := w.mapper.MapToInstancePlayers(pgcr)
+	if err != nil {
+		return err
+	}
 
-		switch {
-		case err == nil:
-			isFullClear := pgcr.FromBeginning && pi.Completed
-			if err := qtx.IncrementPlayerCounts(ctx, db.IncrementPlayerCountsParams{
-				MembershipID: pi.MembershipId,
-				Column2:      pi.Completed,
-				Column3:      isFullClear,
-			}); err != nil {
-				slog.Error("Failed to increment clear counts", "membershipId", pi.MembershipId, "error", err)
-				return err
-			}
-		case errors.Is(err, sql.ErrNoRows):
-			slog.Info("destiny_player already recorded, skipping player entirely", "instanceId", pgcr.ActivityDetails.InstanceId, "membershipId", pi.MembershipId)
-			continue
-		default:
-			slog.Error("Failed to save destiny_player", "instanceId", pgcr.ActivityDetails.InstanceId, "membershipId", pi.MembershipId)
+	for _, player := range instancePlayers {
+		if err := qtx.CreateInstancePlayer(ctx, player); err != nil {
+			slog.Error("Failed to create instance player", "pgcr", instanceId, "memId", player.MembershipID, "error", err)
 			return err
 		}
-
-		// InstanceCharacter
-		for _, ci := range pi.CharacterInfo {
-			if err := qtx.CreateInstanceCharacter(ctx, db.CreateInstanceCharacterParams{
-				InstanceID:   pgcr.ActivityDetails.InstanceId,
-				MembershipID: pi.MembershipId,
-				CharacterID:  ci.CharacterId,
-				EmblemHash:   ci.CharacterEmblem,
-				Completed:    ci.ActivityCompleted,
-				Kills:        int32(ci.Kills),
-				Deaths:       int32(ci.Deaths),
-				Assists:      int32(ci.Assists),
-				Kda:          strconv.FormatFloat(float64(ci.Kda), 'f', -1, 64),
-				Kdr:          strconv.FormatFloat(float64(ci.Kdr), 'f', -1, 64),
-				Efficiency:   int32(ci.Efficiency),
-				SuperKills:   int32(ci.AbilityInfo.SuperKills),
-				GrenadeKills: int32(ci.AbilityInfo.GrenadeKills),
-				MeleeKills:   int32(ci.AbilityInfo.MeleeKills),
-			}); err != nil {
-				slog.Error("Failed to save instance character", "instanceId", pgcr.ActivityDetails.InstanceId, "membershipId", player.MembershipID, "membershipType", player.MembershipType, "characterId", ci.CharacterId)
-				return err
-			}
-
-			for _, ciw := range ci.WeaponInfo {
-				// Weapons
-				strHash := strconv.FormatInt(ciw.WeaponHash, 10)
-				params, err := w.mapper.WeaponInfoToDBEntity(ctx, &ciw)
-				if err != nil {
-					slog.Error("Failed to map weapon to db entity", "hash", strHash, "error", err)
-					return err
-				}
-
-				// Weapons should not be made as part of the whole transaction due to many
-				// raids having similar weapon setups, this makes deadlocks be a regular ocurrance
-				if err := w.queries.CreateWeapon(ctx, params); err != nil {
-					slog.Error("Failed to save weapon", "weaponId", strHash, "error", err)
-					return err
-				}
-
-				// InstanceCharacterWeapons
-				if err := qtx.CreateInstanceCharacterWeapon(ctx, db.CreateInstanceCharacterWeaponParams{
-					InstanceID:         pgcr.ActivityDetails.InstanceId,
-					PlayerMembershipID: pi.MembershipId,
-					PlayerCharacterID:  ci.CharacterId,
-					WeaponID:           ciw.WeaponHash,
-					Kills:              int32(ciw.Kills),
-					PrecisionKills:     int32(ciw.PrecisionKills),
-					PrecisionRatio:     strconv.FormatFloat(float64(ciw.PrecisionRatio), 'f', -1, 64),
-				}); err != nil {
-
-					slog.Error("Failed to save instance character", "instanceId", pgcr.ActivityDetails.InstanceId, "membershipId", player.MembershipID, "membershipType", player.MembershipType, "characterId", ci.CharacterId, "weaponId", strHash)
-					return err
-				}
-			}
+		if err := qtx.IncrementPlayerCounts(ctx, db.IncrementPlayerCountsParams{
+			MembershipID: player.MembershipID,
+			Column2:      instance.IsFresh,
+			Column3:      player.Completed.Bool,
+		}); err != nil {
+			slog.Error("Failed to increment player raid counts", "pgcr", instanceId, "memId", player.MembershipID, "error", err)
+			return err
 		}
 	}
+
+	instanceToons, err := w.mapper.MapToInstanceToons(pgcr)
+	if err != nil {
+		slog.Error("Failed to map instance toons", "pgcr", instanceId)
+		return err
+	}
+
+	for _, toon := range instanceToons {
+		if err := qtx.CreateInstanceCharacter(ctx, toon); err != nil {
+			slog.Error("Failed to create instance character", "pgcr", instanceId, "memId", toon.MembershipID, "characterId", toon.CharacterID, "error", err)
+			return err
+		}
+	}
+
+	instanceToonWeapons, err := w.mapper.MapToInstanceToonWeapons(pgcr)
+	if err != nil {
+		slog.Error("Failed to map instance weapons", "pgcr", instanceId, "error", err)
+		return err
+	}
+
+	for _, toonWeapon := range instanceToonWeapons {
+		if err := qtx.CreateInstanceCharacterWeapon(ctx, toonWeapon); err != nil {
+			slog.Error("Failed to create instance weapons", "pgcr", instanceId, "memId", toonWeapon.PlayerMembershipID, "characterId", toonWeapon.PlayerCharacterID, "weaponId", toonWeapon.WeaponID, "error", err)
+			return err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		slog.Error("Failed to commit transaction", "pgcr", instanceId)
+		return err
+	}
+
 	return nil
 }
