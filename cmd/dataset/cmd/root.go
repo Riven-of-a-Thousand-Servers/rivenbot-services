@@ -101,15 +101,20 @@ dataset`,
 
 			// setup events
 			var eventsWg sync.WaitGroup
+
 			eventsCh := make(chan tea.Msg, EventThroughput)
 			go publishEventsToTea(groupCtx, program, eventsCh)
 
-			c := consumer.NewDatasetConsumer(files, DatasetBrokerSize,
-				consumer.ConsumerOpts{NumFiles: opts.NumFiles, NumLines: opts.NumLines})
+			datasetConsumer := consumer.NewDatasetConsumer(files,
+				DatasetBrokerSize,
+				consumer.ConsumerOpts{
+					NumFiles: opts.NumFiles,
+					NumLines: opts.NumLines,
+				})
 			cache := cache.NewInMemoryCache[manifest.Entry](CacheEventsBrokerSize)
 			setupEvents(ctx, &eventsWg, eventsCh, cache)
 
-			// Prepopulate immediately before instantiating map
+			// Prepopulate immediately before instantiating mapper
 			if err = cache.Prepopulate(groupCtx,
 				opts.ApiKey,
 				manifest.InventoryItemDefinition,
@@ -141,17 +146,16 @@ dataset`,
 				itemWriter = writer.NewPgcrWriter(conn, queries, mapper)
 			}
 
-			ch, err := c.Consume(ctx)
+			ch, err := datasetConsumer.Consume(ctx)
 			if err != nil {
-				os.Exit(1)
+				return err
 			}
 
 			for range opts.Goroutines {
 				g.Go(func() error {
-					chReader := pipeline.NewChannelReader(ch)
-					return chainmorph.From(chReader).
+					return chainmorph.From(pipeline.NewChannelReader(ch)).
 						MapFunc(pipeline.MapRawPgcr).
-						If(pipeline.FilterByMode).
+						If(pipeline.FilterRaids).
 						WriteTo(ctx, itemWriter)
 				})
 			}

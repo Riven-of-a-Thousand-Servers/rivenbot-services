@@ -8,6 +8,6 @@ const (
 	raidMode = 4
 )
 
-func FilterByMode(item bungie.PostGameCarnageReport) bool {
+func FilterRaids(item bungie.PostGameCarnageReport) bool {
 	return item.ActivityDetails.Mode == 4
 }
