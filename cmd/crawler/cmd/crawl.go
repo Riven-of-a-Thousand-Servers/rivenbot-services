@@ -26,7 +26,6 @@ import (
 type crawlerConfig struct {
 	Goroutines    int
 	ApiKey        string
-	Interval      int
 	Offset        int64
 	BaseUrl       string
 	RabbitMQUrl   string
@@ -62,7 +61,6 @@ to have up-to-date information regarding player's raids statistics`,
 	flags.StringVarP(&config.BaseUrl, "base-url", "b", "", "Base URL for fetching PGCRs")
 	flags.IntVarP(&config.Goroutines, "goroutines", "g", 1, "Number of goroutines to spin up")
 	flags.StringVarP(&config.ApiKey, "api-key", "a", "", "Bungie API key")
-	flags.IntVarP(&config.Interval, "interval", "i", 10, "Duration in-between requests to Bungie")
 	flags.Int64VarP(&config.Offset, "offset", "o", 0, "PGCR scraping offset (Initial point to start fetching PGCRs)")
 	flags.StringVar(&config.RabbitMQUrl, "rabbitmq-url", "", "RabbitMQ URL for publishing PGCRs")
 	flags.StringVar(&config.RabbitMQQueue, "rabbitmq-queue", "", "RabbitMQ queue name")
@@ -109,12 +107,10 @@ func runCrawler(ctx context.Context, config crawlerConfig) error {
 	}
 
 	var wg sync.WaitGroup
-	tick := time.NewTicker(time.Duration(config.Interval) * time.Second)
-	defer tick.Stop()
 
 	wg.Add(1)
 	in := make(chan int64, 100)
-	go func(ctx context.Context, throttle *time.Ticker, start int64, in chan<- int64) {
+	go func(ctx context.Context, start int64, in chan<- int64) {
 		defer wg.Done()
 		for {
 			select {
@@ -122,12 +118,11 @@ func runCrawler(ctx context.Context, config crawlerConfig) error {
 				slog.Info("Context cancelled. Exiting.")
 				close(in)
 				return
-			case <-throttle.C:
-				in <- int64(start)
+			case in <- int64(start):
 				start++
 			}
 		}
-	}(ctx, tick, config.Offset, in)
+	}(ctx, config.Offset, in)
 
 	opts := []crawler.PgcrCrawlerOpt{
 		crawler.WithMaxSize(net.MaxRequestSizeKB),

@@ -33,6 +33,7 @@ import (
 
 const (
 	DatasetBrokerSize     = 48
+	FileBrokerSize        = 1000
 	EventThroughput       = 20_000
 	CacheEventsBrokerSize = 10
 )
@@ -86,8 +87,7 @@ dataset`,
 
 			// Discover all .zst files before anything
 			// This cannot fail, otherwise everything goes to shit
-			discoverer := consumer.NewDiscoverer(opts.RootDir)
-			files, err := discoverer.Discover(groupCtx, ".zst")
+			files, err := consumer.NewFileWalker(opts.RootDir).Discover(".zst")
 			if err != nil {
 				return err
 			}
@@ -105,7 +105,7 @@ dataset`,
 			eventsCh := make(chan tea.Msg, EventThroughput)
 			go publishEventsToTea(groupCtx, program, eventsCh)
 
-			datasetConsumer := consumer.NewDatasetConsumer(files,
+			datasetConsumer := consumer.NewFileConsumer(files,
 				DatasetBrokerSize,
 				consumer.ConsumerOpts{
 					NumFiles: opts.NumFiles,
@@ -143,13 +143,15 @@ dataset`,
 				}
 				cleanup = append(cleanup, queries.Close)
 
-				itemWriter = writer.NewPgcrWriter(conn, queries, mapper)
+				itemWriter = writer.NewPgcrWriter(conn, queries, mapper, FileBrokerSize)
 			}
 
 			ch, err := datasetConsumer.Consume(ctx)
 			if err != nil {
 				return err
 			}
+
+			setupEvents(ctx, &eventsWg, eventsCh, datasetConsumer)
 
 			for range opts.Goroutines {
 				g.Go(func() error {

@@ -34,14 +34,8 @@ func (m *DbMapper) MapToDestinyPlayers(pgcr bungie.PostGameCarnageReport) ([]db.
 	players := getUniquePlayers(pgcr)
 	entities := make([]db.CreateDestinyPlayerParams, len(players))
 	for _, player := range players {
-		membershipId, err := strconv.ParseInt(player.MembershipId, 10, 64)
-		if err != nil {
-			slog.Error("Failed to parse membershipId to int64", "membershipId", player.MembershipId, "pgcr", pgcr.ActivityDetails.InstanceId, "error", err)
-			return nil, err
-		}
-
 		entity := db.CreateDestinyPlayerParams{
-			MembershipID:   membershipId,
+			MembershipID:   player.MembershipId.Int64(),
 			MembershipType: int32(player.MembershipType),
 			IsPublic:       sql.NullBool{Bool: player.IsPublic, Valid: true},
 			IconPath:       sql.NullString{String: player.IconPath, Valid: player.IconPath != ""},
@@ -69,8 +63,9 @@ func (m *DbMapper) MapToDestinyPlayers(pgcr bungie.PostGameCarnageReport) ([]db.
 func getUniquePlayers(pgcr bungie.PostGameCarnageReport) map[string]bungie.DestinyUserEntry {
 	players := make(map[string]bungie.DestinyUserEntry)
 	for _, entry := range pgcr.Entries {
-		if _, ok := players[entry.Player.DestinyUserInfo.MembershipId]; !ok {
-			players[entry.Player.DestinyUserInfo.MembershipId] = entry.Player.DestinyUserInfo
+		memId := entry.Player.DestinyUserInfo.MembershipId.String()
+		if _, ok := players[memId]; !ok {
+			players[memId] = entry.Player.DestinyUserInfo
 		}
 	}
 
@@ -237,7 +232,6 @@ func (m *DbMapper) MapToInstanceToonWeapons(pgcr bungie.PostGameCarnageReport) (
 					PrecisionKills:     int32(weapon.Values.PrecisionKills),
 					PrecisionRatio:     weapon.Values.PrecisionRatio.String(),
 				}
-
 				weapons = append(weapons, wep)
 			}
 		}
@@ -266,15 +260,11 @@ func playerCompleted(toons []bungie.StatsEntry) bool {
 func groupByMembershipId(report bungie.PostGameCarnageReport) (map[int64][]bungie.StatsEntry, error) {
 	groupedPlayers := make(map[int64][]bungie.StatsEntry)
 	for _, entry := range report.Entries {
-		membershipId, err := strconv.ParseInt(entry.Player.DestinyUserInfo.MembershipId, 10, 64)
-		if err != nil {
-			slog.Error("Something went wrong when parsing membership ID to Int64", "MembershipId", entry.Player.DestinyUserInfo.MembershipId)
-			return nil, err
-		}
-		if val, ok := groupedPlayers[membershipId]; ok {
-			groupedPlayers[membershipId] = append(val, entry)
+		memId := entry.Player.DestinyUserInfo.MembershipId.Int64()
+		if val, ok := groupedPlayers[memId]; ok {
+			groupedPlayers[memId] = append(val, entry)
 		} else {
-			groupedPlayers[membershipId] = []bungie.StatsEntry{entry}
+			groupedPlayers[memId] = []bungie.StatsEntry{entry}
 		}
 	}
 	return groupedPlayers, nil

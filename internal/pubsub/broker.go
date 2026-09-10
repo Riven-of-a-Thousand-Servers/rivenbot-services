@@ -4,16 +4,21 @@ import (
 	"sync"
 )
 
+type Event[T any] struct {
+	Type    EventType
+	Payload T
+}
+
 type Broker[T any] struct {
 	bufferSize int
 	mu         sync.RWMutex
 	done       chan struct{}
-	subs       map[chan T]struct{}
+	subs       map[chan Event[T]]struct{}
 }
 
 func NewBroker[T any](bufferSize int) *Broker[T] {
 	return &Broker[T]{
-		subs:       make(map[chan T]struct{}),
+		subs:       make(map[chan Event[T]]struct{}),
 		done:       make(chan struct{}),
 		bufferSize: bufferSize,
 	}
@@ -22,11 +27,11 @@ func NewBroker[T any](bufferSize int) *Broker[T] {
 // This function returns the output channel where a subscribe will
 // receive messages from as well as an unsubscribe function used to
 // cleanup resources
-func (b *Broker[T]) Subscribe() (ch <-chan T, unsubscribe func()) {
+func (b *Broker[T]) Subscribe() (ch <-chan Event[T], unsubscribe func()) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	sub := make(chan T, b.bufferSize)
+	sub := make(chan Event[T], b.bufferSize)
 	b.subs[sub] = struct{}{}
 
 	unsubscribe = func() {
@@ -44,13 +49,16 @@ func (b *Broker[T]) Subscribe() (ch <-chan T, unsubscribe func()) {
 
 // TODO: This implementation is actually not that good since it'll drop
 // packets if the sending channel is overwhelmed
-func (b *Broker[T]) Publish(msg T) {
+func (b *Broker[T]) Publish(t EventType, payload T) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	for sub := range b.subs {
 		select {
-		case sub <- msg:
+		case sub <- Event[T]{
+			Type:    t,
+			Payload: payload,
+		}:
 		default:
 		}
 	}

@@ -1,7 +1,6 @@
 package consumer
 
 import (
-	"context"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -9,8 +8,8 @@ import (
 
 func TestDiscoverSuccessfulRun(t *testing.T) {
 	root := "./testdata/"
-	sut := NewDiscoverer(root)
-	idx, err := sut.Discover(context.Background(), ".zst")
+	sut := NewFileWalker(root)
+	idx, err := sut.Discover(".zst")
 	if err != nil {
 		t.Fatalf("Not expecting error, got %v", err)
 	}

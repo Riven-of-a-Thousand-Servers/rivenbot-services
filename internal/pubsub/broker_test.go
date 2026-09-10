@@ -17,11 +17,11 @@ func TestSubscription(t *testing.T) {
 	defer unsub()
 
 	in := someStruct{field: 1}
-	s.Publish(in)
+	s.Publish(0, in)
 
 	select {
 	case out := <-ch:
-		assert.Equal(t, out.field, in.field)
+		assert.Equal(t, out.Payload.field, in.field)
 	default:
 		log.Fatal("Should not run this select branch")
 	}
@@ -36,7 +36,7 @@ func TestPublishingDropsPackets(t *testing.T) {
 	// Any packets after size should be dropped
 	// and not block
 	for i := range size + 5 {
-		s.Publish(someStruct{field: i})
+		s.Publish(0, someStruct{field: i})
 	}
 
 	assert.Equal(t, len(ch), size)

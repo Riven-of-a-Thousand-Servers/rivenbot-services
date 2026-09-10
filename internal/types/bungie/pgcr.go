@@ -121,13 +121,13 @@ type PlayerEntry struct {
 }
 
 type DestinyUserEntry struct {
-	IconPath                    string `json:"iconPath"`
-	IsPublic                    bool   `json:"isPublic"`
-	MembershipId                string `json:"membershipId"`
-	MembershipType              int    `json:"membershipType"`
-	DisplayName                 string `json:"displayName"`
-	BungieGlobalDisplayName     string `json:"bungieGlobalDisplayName"`
-	BungieGlobalDisplayNameCode int    `json:"bungieGlobalDisplayNameCode"`
+	IconPath                    string      `json:"iconPath"`
+	IsPublic                    bool        `json:"isPublic"`
+	MembershipId                StringInt64 `json:"membershipId"`
+	MembershipType              int         `json:"membershipType"`
+	DisplayName                 string      `json:"displayName"`
+	BungieGlobalDisplayName     string      `json:"bungieGlobalDisplayName"`
+	BungieGlobalDisplayNameCode int         `json:"bungieGlobalDisplayNameCode"`
 }
 
 type CarnageEntry struct {

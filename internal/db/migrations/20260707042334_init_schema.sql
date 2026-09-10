@@ -49,8 +49,7 @@ CREATE INDEX IF NOT EXISTS instance_activity_hash_idx ON instance (activity_hash
 CREATE TABLE IF NOT EXISTS pgcr (
     instance_id bigint PRIMARY KEY,
     blob bytea NOT NULL,
-    created_at timestamp NOT NULL DEFAULT now(),
-    CONSTRAINT instance_id_fk FOREIGN KEY (instance_id) REFERENCES instance (id)
+    created_at timestamp NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS destiny_player (

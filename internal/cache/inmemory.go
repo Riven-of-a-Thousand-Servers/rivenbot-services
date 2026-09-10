@@ -11,7 +11,6 @@ import (
 
 	"pgcr-processing-service/internal/pubsub"
 	"pgcr-processing-service/internal/types/manifest"
-	"pgcr-processing-service/internal/types/ui"
 )
 
 const (
@@ -19,6 +18,11 @@ const (
 	manifestPath = "/Platform/Destiny2/Manifest"
 	apiKeyHeader = "x-api-key"
 )
+
+type CacheEvent struct {
+	CurrentDefinition manifest.EntityDefinition
+	Size              int
+}
 
 // BungieFetcher represents a function that takes care of fetching
 // a bungie resource and hiding implementation details from the cache
@@ -28,7 +32,7 @@ type BungieFetcher[T any] func(context.Context, string) (T, error)
 
 type InMemoryCache[T any] struct {
 	entries map[string]T
-	*pubsub.Broker[ui.CacheEvent]
+	*pubsub.Broker[CacheEvent]
 }
 
 // Creates an In-memory cache with an internal broker with buffer size specified
@@ -36,7 +40,7 @@ func NewInMemoryCache[T any](brokerSize int) *InMemoryCache[T] {
 	entries := make(map[string]T)
 	return &InMemoryCache[T]{
 		entries: entries,
-		Broker:  pubsub.NewBroker[ui.CacheEvent](brokerSize),
+		Broker:  pubsub.NewBroker[CacheEvent](brokerSize),
 	}
 }
 
@@ -53,9 +57,7 @@ func (c *InMemoryCache[T]) Get(ctx context.Context, hash string, entity manifest
 // from the /Destiny2/Manifest/ endpoint from Bungie.net
 func (c *InMemoryCache[T]) Prepopulate(ctx context.Context, apiKey string, defs ...manifest.EntityDefinition) error {
 	slog.Info("Prepopulating cache")
-	c.Publish(ui.CacheEvent{
-		Type: ui.CacheStarted,
-	})
+	c.Publish(pubsub.CacheStarted, CacheEvent{})
 
 	manifestFetcher := HttpFetcher[manifest.Response[manifest.CompleteManifest]](http.DefaultClient, apiKey)
 	manifestComponentFetcher := HttpFetcher[manifest.RawComponent[T]](http.DefaultClient, apiKey)
@@ -68,8 +70,7 @@ func (c *InMemoryCache[T]) Prepopulate(ctx context.Context, apiKey string, defs 
 	for _, def := range defs {
 		path := manifest.Response.WorldComponentContentPaths.English[def.String()]
 
-		c.Publish(ui.CacheEvent{
-			Type:              ui.CacheLoading,
+		c.Publish(pubsub.CacheLoading, CacheEvent{
 			CurrentDefinition: def,
 		})
 
@@ -81,8 +82,7 @@ func (c *InMemoryCache[T]) Prepopulate(ctx context.Context, apiKey string, defs 
 		maps.Copy(c.entries, entry)
 	}
 
-	c.Publish(ui.CacheEvent{
-		Type: ui.CacheFinished,
+	c.Publish(pubsub.CacheFinished, CacheEvent{
 		Size: len(c.entries),
 	})
 

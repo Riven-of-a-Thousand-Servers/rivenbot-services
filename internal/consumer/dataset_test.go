@@ -10,14 +10,16 @@ import (
 )
 
 func TestStartShouldRunSuccesfully(t *testing.T) {
-	var fileIdx FileIndex = map[string]*FileEntry{
-		"./testdata/example.jsonl.zst": {
-			Name:    "test.zst",
-			Started: false,
-			Done:    false,
+	var fileIdx FileIndex = []FileEntry{
+		{
+			Filename: "test.zst",
+			Path:     "./testdata/example.jsonl.zst",
+			Started:  false,
+			Done:     false,
 		},
 	}
-	sut := NewDatasetConsumer(fileIdx, 12, ConsumerOpts{})
+
+	sut := NewFileConsumer(fileIdx, 12, ConsumerOpts{})
 	consumeCh := make(chan Delivery[dataset.RawContent], 3)
 	sut.ch = consumeCh
 	subCh, unsub := sut.Subscribe()
@@ -33,14 +35,16 @@ func TestStartShouldRunSuccesfully(t *testing.T) {
 }
 
 func TestLineLimitsShouldBeRespected(t *testing.T) {
-	var fileIdx FileIndex = map[string]*FileEntry{
-		"./testdata/example.jsonl.zst": {
-			Name:    "example.jsonl.zst",
-			Started: false,
-			Done:    false,
+	var fileIdx FileIndex = []FileEntry{
+		{
+			Filename: "test.zst",
+			Path:     "./testdata/example.jsonl.zst",
+			Started:  false,
+			Done:     false,
 		},
 	}
-	sut := NewDatasetConsumer(fileIdx, 12, ConsumerOpts{
+
+	sut := NewFileConsumer(fileIdx, 12, ConsumerOpts{
 		NumLines: 1,
 	})
 	consumeCh := make(chan Delivery[dataset.RawContent], 3)
@@ -58,21 +62,25 @@ func TestLineLimitsShouldBeRespected(t *testing.T) {
 }
 
 func TestFileLimitsShouldBeRespected(t *testing.T) {
-	var fileIdx FileIndex = map[string]*FileEntry{
-		"./testdata/example.jsonl.zst": {
-			Name:    "example.jsonl.zst",
-			Started: false,
-			Done:    false,
+	var fileIdx FileIndex = []FileEntry{
+		{
+			Filename: "test.zst",
+			Path:     "./testdata/example.jsonl.zst",
+			Started:  false,
+			Done:     false,
 		},
-		"./testdata/example2.jsonl.zst": {
-			Name:    "example2.jsonl.zst",
-			Started: false,
-			Done:    false,
+		{
+			Filename: "example2.jsonl.zst",
+			Path:     "./testdata/example2.jsonl.zst",
+			Started:  false,
+			Done:     false,
 		},
 	}
-	sut := NewDatasetConsumer(fileIdx, 12, ConsumerOpts{
+
+	sut := NewFileConsumer(fileIdx, 12, ConsumerOpts{
 		NumFiles: 1,
 	})
+
 	consumeCh := make(chan Delivery[dataset.RawContent], 3)
 	sut.ch = consumeCh
 	subCh, unsub := sut.Subscribe()

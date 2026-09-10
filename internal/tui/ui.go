@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	events "pgcr-processing-service/internal/types/ui"
+	"pgcr-processing-service/internal/cache"
+	"pgcr-processing-service/internal/consumer"
+	"pgcr-processing-service/internal/pubsub"
 
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/table"
@@ -132,47 +134,47 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spinner, cmd = m.spinner.Update(msg)
 		cmds = append(cmds, cmd, m.spinner.Tick)
 		// Cache warming events
-	case events.CacheEvent:
+	case pubsub.Event[cache.CacheEvent]:
 		switch msg.Type {
-		case events.CacheStarted:
+		case pubsub.CacheStarted:
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			cmds = append(cmds, cmd)
 			m.state = cacheWarming
 			m.cacheStageMsg = "Initializing cache..."
-		case events.CacheLoading:
-			m.cacheStageMsg = fmt.Sprintf("Fetching %s", msg.CurrentDefinition.String())
-		case events.CacheFinished:
+		case pubsub.CacheLoading:
+			m.cacheStageMsg = fmt.Sprintf("Fetching %s", msg.Payload.CurrentDefinition.String())
+		case pubsub.CacheFinished:
 			// Cache warming finished, now moving to datasetProcessing
-			m.cacheStageMsg = fmt.Sprintf("Finished warming up the cache with %d entries", msg.Size)
+			m.cacheStageMsg = fmt.Sprintf("Finished warming up the cache with %d entries", msg.Payload.Size)
 			m.state = datasetProcessing
 		}
 
 	// Broker events related to uiEvents events
-	case events.FileEvent:
+	case pubsub.Event[consumer.File]:
 		switch msg.Type {
-		case events.FileStarted:
-			m.inFlight[msg.Filename] = &fileState{
+		case pubsub.FileStarted:
+			m.inFlight[msg.Payload.Filename] = &fileState{
 				rowsTotal: rowsPerFile,
 				startedAt: time.Now(),
 			}
-		case events.FileProgress:
-			_, ok := m.inFlight[msg.Filename]
+		case pubsub.FileProgress:
+			_, ok := m.inFlight[msg.Payload.Filename]
 			if !ok {
-				m.inFlight[msg.Filename] = &fileState{
+				m.inFlight[msg.Payload.Filename] = &fileState{
 					rowsTotal: rowsPerFile,
 					startedAt: time.Now(),
 				}
 			}
 
-			m.inFlight[msg.Filename].rowsDone = msg.RowsDone
-			if msg.Err != nil {
-				m.inFlight[msg.Filename].errCount++
+			m.inFlight[msg.Payload.Filename].rowsDone = msg.Payload.RowsDone
+			if msg.Payload.Err != nil {
+				m.inFlight[msg.Payload.Filename].errCount++
 			}
-		case events.FileCompleted:
-			delete(m.inFlight, msg.Filename)
+		case pubsub.FileCompleted:
+			delete(m.inFlight, msg.Payload.Filename)
 			m.filesDone++
-			if msg.Err != nil {
+			if msg.Payload.Err != nil {
 				m.errored++
 			}
 		}

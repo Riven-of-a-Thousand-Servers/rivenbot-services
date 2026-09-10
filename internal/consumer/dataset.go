@@ -11,7 +11,6 @@ import (
 
 	"pgcr-processing-service/internal/pubsub"
 	"pgcr-processing-service/internal/types/dataset"
-	events "pgcr-processing-service/internal/types/ui"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -23,8 +22,15 @@ type ConsumerOpts struct {
 	NumLines int
 }
 
-type DatasetConsumer struct {
-	*pubsub.Broker[events.FileEvent]
+type File struct {
+	Filename string
+	RowsDone int
+	Elapsed  time.Duration
+	Err      error
+}
+
+type FileConsumer struct {
+	*pubsub.Broker[File]
 	FileIndex FileIndex
 	once      sync.Once
 	ch        chan Delivery[dataset.RawContent]
@@ -32,16 +38,16 @@ type DatasetConsumer struct {
 	numLines  int
 }
 
-func NewDatasetConsumer(idx FileIndex, brokerSize int, opts ConsumerOpts) *DatasetConsumer {
-	return &DatasetConsumer{
+func NewFileConsumer(idx FileIndex, brokerSize int, opts ConsumerOpts) *FileConsumer {
+	return &FileConsumer{
 		FileIndex: idx,
-		Broker:    pubsub.NewBroker[events.FileEvent](brokerSize),
+		Broker:    pubsub.NewBroker[File](brokerSize),
 		numFiles:  opts.NumFiles,
 		numLines:  opts.NumLines,
 	}
 }
 
-func (c *DatasetConsumer) Consume(ctx context.Context) (<-chan Delivery[dataset.RawContent], error) {
+func (c *FileConsumer) Consume(ctx context.Context) (<-chan Delivery[dataset.RawContent], error) {
 	c.once.Do(func() {
 		c.ch = make(chan Delivery[dataset.RawContent])
 		go c.Start(ctx)
@@ -50,22 +56,22 @@ func (c *DatasetConsumer) Consume(ctx context.Context) (<-chan Delivery[dataset.
 	return c.ch, nil
 }
 
-func (c *DatasetConsumer) Start(ctx context.Context) error {
+func (c *FileConsumer) Start(ctx context.Context) error {
 	defer close(c.ch)
 
 	fileCount := 0
-	for filepath, entry := range c.FileIndex {
+	for _, entry := range c.FileIndex {
 		if c.numFiles > 0 && fileCount >= c.numFiles {
 			break
 		}
 
-		if err := c.setupFile(ctx, filepath, entry); err != nil {
+		if err := c.setupFile(ctx, entry); err != nil {
 			if errors.Is(err, context.Canceled) {
-				slog.Info("Consumer stopped: context cancelled", "path", filepath)
+				slog.Info("Consumer stopped: context cancelled")
 				return err
 			}
 
-			slog.Error("Error scanning file", "path", filepath, "error", err)
+			slog.Error("Error scanning file", "path", entry.Path, "error", err)
 			return err
 		}
 		fileCount++
@@ -74,12 +80,12 @@ func (c *DatasetConsumer) Start(ctx context.Context) error {
 	return nil
 }
 
-func (c *DatasetConsumer) setupFile(ctx context.Context, path string, entry *FileEntry) error {
+func (c *FileConsumer) setupFile(ctx context.Context, entry FileEntry) error {
 	start := time.Now()
-	slog.Info("Starting to setup file for consumption", "file", entry.Name)
-	file, err := os.Open(path)
+	slog.Info("Starting to setup file for consumption", "file", entry.Filename)
+	file, err := os.Open(entry.Path)
 	if err != nil {
-		slog.Error("Failed to open file", "path", path, "error", err)
+		slog.Error("Failed to open file", "path", entry.Path, "error", err)
 		return err
 	}
 
@@ -88,7 +94,7 @@ func (c *DatasetConsumer) setupFile(ctx context.Context, path string, entry *Fil
 	bufReader := bufio.NewReader(file)
 	decoder, err := zstd.NewReader(bufReader)
 	if err != nil {
-		slog.Error("Error creating zstd reader", "file", entry.Name, "error", err)
+		slog.Error("Error creating zstd reader", "file", entry.Filename, "error", err)
 		return err
 	}
 	defer decoder.Close()
@@ -97,11 +103,9 @@ func (c *DatasetConsumer) setupFile(ctx context.Context, path string, entry *Fil
 	scanner := bufio.NewScanner(decoder)
 	scanner.Buffer(buf, maxSize)
 
-	entry.SetStarted()
-	c.Publish(events.FileEvent{
-		Type:     events.FileStarted,
+	c.Publish(pubsub.FileStarted, File{
 		RowsDone: 0,
-		Filename: entry.Name,
+		Filename: entry.Filename,
 		Elapsed:  time.Since(start),
 	})
 
@@ -113,9 +117,7 @@ func (c *DatasetConsumer) setupFile(ctx context.Context, path string, entry *Fil
 		return err
 	}
 
-	entry.SetDone()
-	c.Publish(events.FileEvent{
-		Type:     events.FileCompleted,
+	c.Publish(pubsub.FileCompleted, File{
 		RowsDone: 10_000_000,
 		Filename: file.Name(),
 		Elapsed:  time.Since(start),
@@ -124,7 +126,7 @@ func (c *DatasetConsumer) setupFile(ctx context.Context, path string, entry *Fil
 	return nil
 }
 
-func (c *DatasetConsumer) scanLines(ctx context.Context, scanner *bufio.Scanner, entry *FileEntry) error {
+func (c *FileConsumer) scanLines(ctx context.Context, scanner *bufio.Scanner, entry FileEntry) error {
 	lineCount := 0
 
 ScanLoop:
@@ -156,10 +158,9 @@ ScanLoop:
 				return ctx.Err()
 			}
 
-			c.Publish(events.FileEvent{
-				Type:     events.FileProgress,
+			c.Publish(pubsub.FileProgress, File{
 				RowsDone: lineCount,
-				Filename: entry.Name,
+				Filename: entry.Filename,
 			})
 		}
 		lineCount++

@@ -21,6 +21,7 @@ type PgcrWriter struct {
 func NewPgcrWriter(db *sql.DB,
 	queries *db.Queries,
 	mapper *mapper.DbMapper,
+	brokerSize int,
 ) *PgcrWriter {
 	return &PgcrWriter{
 		db:      db,
@@ -47,6 +48,7 @@ func (w *PgcrWriter) Write(ctx context.Context, pgcr bungie.PostGameCarnageRepor
 		slog.Error("Failed to save destiny 2 players", "pgcr", instanceId, "error", err)
 	}
 
+	// TODO: We COULD theoretically get all weapons before processing PGCRs
 	if err := w.saveWeapons(ctx, pgcr); err != nil {
 		slog.Error("Failed to save weapons", "pgcr", instanceId, "error", err)
 		return err

@@ -26,6 +26,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const (
+	FileBrokerSize = 1000
+)
+
 type processorOpts struct {
 	RedisUrl      string
 	RabbitMQUrl   string
@@ -94,7 +98,7 @@ func newProcessCommand() *cobra.Command {
 
 				mapper := mapper.New(redisCache)
 
-				itemWriter = writer.NewPgcrWriter(conn, queries, mapper)
+				itemWriter = writer.NewPgcrWriter(conn, queries, mapper, FileBrokerSize)
 			}
 
 			ch, err := rabbitmq.Consume(ctx)
