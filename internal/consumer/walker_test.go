@@ -9,7 +9,7 @@ import (
 func TestDiscoverSuccessfulRun(t *testing.T) {
 	root := "./testdata/"
 	sut := NewFileWalker(root)
-	idx, err := sut.Discover(".zst")
+	idx, err := sut.DiscoverByExtension(".zst")
 	if err != nil {
 		t.Fatalf("Not expecting error, got %v", err)
 	}

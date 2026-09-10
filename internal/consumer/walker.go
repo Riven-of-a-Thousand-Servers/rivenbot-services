@@ -28,7 +28,8 @@ func NewFileWalker(root string) *FileWalker {
 	return &FileWalker{Root: root}
 }
 
-func (f *FileWalker) Discover(extension string) (FileIndex, error) {
+// TODO: Create a DiscoverByPattern method or just create a chainmorph filter
+func (f *FileWalker) DiscoverByExtension(extension string) (FileIndex, error) {
 	var entries []FileEntry
 	if err := filepath.WalkDir(f.Root, f.getFilesByExtension(".ext", &entries)); err != nil {
 		return nil, err
