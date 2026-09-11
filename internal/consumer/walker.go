@@ -4,13 +4,18 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
 	"pgcr-processing-service/internal/pubsub"
 )
 
+const defaultEventBroker = 50
+
 type FileIndex []FileEntry
+
+type filterFunc func(fs.DirEntry) bool
 
 type FileWalker struct {
 	*pubsub.Broker[FileEntry]
@@ -25,13 +30,41 @@ type FileEntry struct {
 }
 
 func NewFileWalker(root string) *FileWalker {
-	return &FileWalker{Root: root}
+	return &FileWalker{Root: root, Broker: pubsub.NewBroker[FileEntry](defaultEventBroker)}
 }
 
-// TODO: Create a DiscoverByPattern method or just create a chainmorph filter
-func (f *FileWalker) DiscoverByExtension(extension string) (FileIndex, error) {
+// DiscoverFunc takes in a list of filters to be applied sequentially
+// if any of the directoryEntries fails one of the filters then it is skipped
+func (f *FileWalker) DiscoverFunc(filters ...filterFunc) (FileIndex, error) {
 	var entries []FileEntry
-	if err := filepath.WalkDir(f.Root, f.getFilesByExtension(".ext", &entries)); err != nil {
+	if err := filepath.WalkDir(f.Root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if os.IsPermission(err) {
+				return filepath.SkipDir
+			}
+			return err
+		}
+
+		for _, filter := range filters {
+			if !filter(d) {
+				if d.IsDir() && path != f.Root {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+		}
+
+		entry := FileEntry{
+			Path:     path,
+			Filename: d.Name(),
+			Started:  false,
+			Done:     false,
+		}
+		entries = append(entries, entry)
+		f.Broker.Publish(pubsub.WalkerProgress, entry)
+
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 
@@ -42,30 +75,23 @@ func (f *FileWalker) DiscoverByExtension(extension string) (FileIndex, error) {
 	return entries, nil
 }
 
-func (f *FileWalker) getFilesByExtension(extension string, idx *[]FileEntry) fs.WalkDirFunc {
-	return func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			if os.IsPermission(err) {
-				return filepath.SkipDir
-			}
-			return err
-		}
+func HasExtension(extension string) filterFunc {
+	return func(de fs.DirEntry) bool {
+		return !de.IsDir() && filepath.Ext(de.Name()) == extension
+	}
+}
 
-		// Skip any hidden directories or the $RECYBLE_BIN directory
-		if d.IsDir() && (strings.HasPrefix(d.Name(), ".") || strings.HasPrefix(d.Name(), "$")) {
-			return filepath.SkipDir
-		}
+var NotHiddenFile filterFunc = func(de fs.DirEntry) bool {
+	return strings.HasPrefix(de.Name(), ".")
+}
 
-		if filepath.Ext(d.Name()) == extension {
-			entry := FileEntry{
-				Filename: d.Name(),
-				Started:  false,
-				Done:     false,
-			}
+var NotReserved filterFunc = func(de fs.DirEntry) bool {
+	return strings.HasPrefix(de.Name(), "$")
+}
 
-			*idx = append(*idx, entry)
-			f.Broker.Publish(pubsub.WalkerProgress, entry)
-		}
-		return nil
+func RegexMatch(pattern string) filterFunc {
+	return func(de fs.DirEntry) bool {
+		res, _ := regexp.Match(pattern, []byte(de.Name()))
+		return res
 	}
 }
