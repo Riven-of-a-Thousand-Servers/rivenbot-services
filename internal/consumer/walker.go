@@ -82,11 +82,11 @@ func HasExtension(extension string) filterFunc {
 }
 
 var NotHiddenFile filterFunc = func(de fs.DirEntry) bool {
-	return strings.HasPrefix(de.Name(), ".")
+	return !strings.HasPrefix(de.Name(), ".")
 }
 
 var NotReserved filterFunc = func(de fs.DirEntry) bool {
-	return strings.HasPrefix(de.Name(), "$")
+	return !strings.HasPrefix(de.Name(), "$")
 }
 
 func RegexMatch(pattern string) filterFunc {
