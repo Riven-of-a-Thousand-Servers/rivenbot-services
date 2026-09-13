@@ -33,9 +33,9 @@ func NewFileWalker(root string) *FileWalker {
 	return &FileWalker{Root: root, Broker: pubsub.NewBroker[FileEntry](defaultEventBroker)}
 }
 
-// DiscoverFunc takes in a list of filters to be applied sequentially
+// WalkAndAccumulate takes in a list of filters to be applied sequentially
 // if any of the directoryEntries fails one of the filters then it is skipped
-func (f *FileWalker) DiscoverFunc(filters ...filterFunc) (FileIndex, error) {
+func (f *FileWalker) WalkAndAccumulate(filters ...filterFunc) (FileIndex, error) {
 	var entries []FileEntry
 	if err := filepath.WalkDir(f.Root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -52,6 +52,10 @@ func (f *FileWalker) DiscoverFunc(filters ...filterFunc) (FileIndex, error) {
 				}
 				return nil
 			}
+		}
+
+		if d.IsDir() {
+			return nil
 		}
 
 		entry := FileEntry{
@@ -75,23 +79,27 @@ func (f *FileWalker) DiscoverFunc(filters ...filterFunc) (FileIndex, error) {
 	return entries, nil
 }
 
-func HasExtension(extension string) filterFunc {
-	return func(de fs.DirEntry) bool {
-		return !de.IsDir() && filepath.Ext(de.Name()) == extension
+func WithExtension(extension string) filterFunc {
+	if !strings.HasPrefix(extension, ".") {
+		extension = "." + extension
+	}
+
+	return func(d fs.DirEntry) bool {
+		return !d.IsDir() && filepath.Ext(d.Name()) == extension
 	}
 }
 
-var NotHiddenFile filterFunc = func(de fs.DirEntry) bool {
+var ExcludeHidden filterFunc = func(de fs.DirEntry) bool {
 	return !strings.HasPrefix(de.Name(), ".")
 }
 
-var NotReserved filterFunc = func(de fs.DirEntry) bool {
+var ExcludeReserved filterFunc = func(de fs.DirEntry) bool {
 	return !strings.HasPrefix(de.Name(), "$")
 }
 
-func RegexMatch(pattern string) filterFunc {
+func MatchRegex(pattern string) filterFunc {
+	regex, _ := regexp.Compile(pattern)
 	return func(de fs.DirEntry) bool {
-		res, _ := regexp.Match(pattern, []byte(de.Name()))
-		return res
+		return regex.Match([]byte(de.Name()))
 	}
 }

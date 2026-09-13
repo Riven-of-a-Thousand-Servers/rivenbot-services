@@ -88,10 +88,10 @@ dataset`,
 			// Discover all .zst files before anything
 			// This cannot fail, otherwise everything goes to shit
 			walker := consumer.NewFileWalker(opts.RootDir)
-			files, err := walker.DiscoverFunc(
-				consumer.HasExtension(".zst"),
-				consumer.NotHiddenFile,
-				consumer.NotReserved)
+			files, err := walker.WalkAndAccumulate(
+				consumer.WithExtension(".zst"),
+				consumer.ExcludeHidden,
+				consumer.ExcludeReserved)
 			if err != nil {
 				return err
 			}
