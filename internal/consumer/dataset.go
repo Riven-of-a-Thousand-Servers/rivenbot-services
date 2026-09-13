@@ -11,6 +11,7 @@ import (
 
 	"pgcr-processing-service/internal/pubsub"
 	"pgcr-processing-service/internal/types/dataset"
+	"pgcr-processing-service/internal/walker"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -31,14 +32,14 @@ type File struct {
 
 type FileConsumer struct {
 	*pubsub.Broker[File]
-	FileIndex FileIndex
+	FileIndex walker.FileIndex
 	once      sync.Once
 	ch        chan Delivery[dataset.RawContent]
 	numFiles  int
 	numLines  int
 }
 
-func NewFileConsumer(idx FileIndex, brokerSize int, opts ConsumerOpts) *FileConsumer {
+func NewFileConsumer(idx walker.FileIndex, brokerSize int, opts ConsumerOpts) *FileConsumer {
 	return &FileConsumer{
 		FileIndex: idx,
 		Broker:    pubsub.NewBroker[File](brokerSize),
@@ -80,7 +81,7 @@ func (c *FileConsumer) Start(ctx context.Context) error {
 	return nil
 }
 
-func (c *FileConsumer) setupFile(ctx context.Context, entry FileEntry) error {
+func (c *FileConsumer) setupFile(ctx context.Context, entry walker.FileEntry) error {
 	start := time.Now()
 	slog.Info("Starting to setup file for consumption", "file", entry.Filename)
 	file, err := os.Open(entry.Path)
@@ -126,7 +127,7 @@ func (c *FileConsumer) setupFile(ctx context.Context, entry FileEntry) error {
 	return nil
 }
 
-func (c *FileConsumer) scanLines(ctx context.Context, scanner *bufio.Scanner, entry FileEntry) error {
+func (c *FileConsumer) scanLines(ctx context.Context, scanner *bufio.Scanner, entry walker.FileEntry) error {
 	lineCount := 0
 
 ScanLoop:

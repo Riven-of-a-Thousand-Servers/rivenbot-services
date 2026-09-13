@@ -5,12 +5,13 @@ import (
 	"testing"
 
 	"pgcr-processing-service/internal/types/dataset"
+	"pgcr-processing-service/internal/walker"
 
 	"gotest.tools/v3/assert"
 )
 
 func TestStartShouldRunSuccesfully(t *testing.T) {
-	var fileIdx FileIndex = []FileEntry{
+	var fileIdx walker.FileIndex = []walker.FileEntry{
 		{
 			Filename: "test.zst",
 			Path:     "./testdata/example.jsonl.zst",
@@ -35,7 +36,7 @@ func TestStartShouldRunSuccesfully(t *testing.T) {
 }
 
 func TestLineLimitsShouldBeRespected(t *testing.T) {
-	var fileIdx FileIndex = []FileEntry{
+	var fileIdx walker.FileIndex = []walker.FileEntry{
 		{
 			Filename: "test.zst",
 			Path:     "./testdata/example.jsonl.zst",
@@ -62,7 +63,7 @@ func TestLineLimitsShouldBeRespected(t *testing.T) {
 }
 
 func TestFileLimitsShouldBeRespected(t *testing.T) {
-	var fileIdx FileIndex = []FileEntry{
+	var fileIdx walker.FileIndex = []walker.FileEntry{
 		{
 			Filename: "test.zst",
 			Path:     "./testdata/example.jsonl.zst",

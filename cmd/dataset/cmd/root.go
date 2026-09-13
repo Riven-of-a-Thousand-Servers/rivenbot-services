@@ -21,6 +21,7 @@ import (
 	ui "pgcr-processing-service/internal/tui"
 	"pgcr-processing-service/internal/types/bungie"
 	"pgcr-processing-service/internal/types/manifest"
+	"pgcr-processing-service/internal/walker"
 	"pgcr-processing-service/internal/writer"
 
 	"pgcr-processing-service/internal/pipeline"
@@ -87,11 +88,12 @@ dataset`,
 
 			// Discover all .zst files before anything
 			// This cannot fail, otherwise everything goes to shit
-			walker := consumer.NewFileWalker(opts.RootDir)
-			files, err := walker.WalkAndAccumulate(
-				consumer.WithExtension(".zst"),
-				consumer.ExcludeHidden,
-				consumer.ExcludeReserved)
+			fileWalker := walker.NewFileWalker(opts.RootDir,
+				walker.WithEventsEnabled,
+				walker.WithDirFilter(walker.ExcludeHidden),
+				walker.WithDirFilter(walker.ExcludeReserved),
+				walker.WithFileFilter(walker.WithExtension("zst")))
+			files, err := fileWalker.WalkAndAccumulate()
 			if err != nil {
 				return err
 			}
