@@ -40,13 +40,14 @@ const (
 )
 
 type datasetOpts struct {
-	RootDir    string
-	DbUrl      string
-	ApiKey     string
-	Goroutines int
-	Noop       bool
-	NumFiles   int
-	NumLines   int
+	RootDir     string
+	DbUrl       string
+	ApiKey      string
+	FilePattern string
+	Goroutines  int
+	Noop        bool
+	NumFiles    int
+	NumLines    int
 }
 
 func newRootCommand() *cobra.Command {
@@ -92,7 +93,8 @@ dataset`,
 				walker.WithEventsEnabled,
 				walker.WithDirFilter(walker.ExcludeHidden),
 				walker.WithDirFilter(walker.ExcludeReserved),
-				walker.WithFileFilter(walker.WithExtension("zst")))
+				walker.WithFileFilter(walker.WithExtension("zst")),
+				walker.WithFileFilter(walker.WithPattern(opts.FilePattern)))
 			files, err := fileWalker.WalkAndAccumulate()
 			if err != nil {
 				return err
@@ -186,6 +188,7 @@ dataset`,
 	flags.StringVarP(&opts.ApiKey, "api-key", "a", "", "Bungie.net API key")
 	flags.BoolVar(&opts.Noop, "noop", false, "If the processor to be used is a Noop processor")
 	flags.IntVarP(&opts.Goroutines, "goroutines", "g", 1, "Number of workers to spin up")
+	flags.StringVarP(&opts.FilePattern, "pattern", "p", "", "File pattern to match when discovering files")
 
 	return cmd
 }

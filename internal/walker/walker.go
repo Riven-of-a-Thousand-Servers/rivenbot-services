@@ -139,9 +139,12 @@ var ExcludeReserved FilterFunc = func(de fs.DirEntry) bool {
 	return !strings.HasPrefix(de.Name(), "$")
 }
 
-func MatchRegex(pattern string) FilterFunc {
+func WithPattern(pattern string) FilterFunc {
 	regex, _ := regexp.Compile(pattern)
 	return func(de fs.DirEntry) bool {
-		return regex.Match([]byte(de.Name()))
+		if strings.TrimSpace(pattern) == "" {
+			return true
+		}
+		return regex.MatchString(de.Name())
 	}
 }

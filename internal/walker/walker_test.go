@@ -33,6 +33,10 @@ func Test_WalkAndAccumulate(t *testing.T) {
 			files:    []FilterFunc{WithExtension("zst")},
 			expected: 4,
 		},
+		"Should filter by regex pattern": {
+			files:    []FilterFunc{WithPattern(`^example\.+`)},
+			expected: 5,
+		},
 	}
 
 	for test, tt := range tests {
