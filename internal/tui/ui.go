@@ -74,12 +74,14 @@ type Model struct {
 	cancelFunc context.CancelFunc
 }
 
-func NewModel(
-	cancelFunc context.CancelFunc,
-) Model {
-	s := spinner.New(spinner.WithSpinner(spinner.Dot), spinner.WithStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("205"))))
+func NewModel(cancelFunc context.CancelFunc) Model {
+	spinnerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	spinner := spinner.New(
+		spinner.WithSpinner(spinner.Dot),
+		spinner.WithStyle(spinnerStyle))
+
 	return Model{
-		spinner:    s,
+		spinner:    spinner,
 		state:      cacheWarming,
 		inFlight:   make(map[string]*fileState),
 		tbl:        newTable(),
@@ -150,7 +152,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.state = datasetProcessing
 		}
 
-	// Broker events related to uiEvents events
+	// Broker events related to ui events
 	case pubsub.Event[consumer.File]:
 		switch msg.Type {
 		case pubsub.FileStarted:
@@ -163,7 +165,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !ok {
 				m.inFlight[msg.Payload.Filename] = &fileState{
 					rowsTotal: rowsPerFile,
-					startedAt: time.Now(),
 				}
 			}
 

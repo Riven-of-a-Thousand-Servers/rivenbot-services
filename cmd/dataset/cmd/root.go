@@ -161,6 +161,7 @@ dataset`,
 
 			setupEvents(ctx, &eventsWg, eventsCh, datasetConsumer)
 
+			// Core-loop
 			for range opts.Goroutines {
 				g.Go(func() error {
 					return chainmorph.From(pipeline.NewChannelReader(ch)).
