@@ -39,7 +39,19 @@ type (
 		queues []queueEntry
 		tasks  []*Task
 	}
+
+	// Job represents the task a Task Worker is tasked with doing
+	// and additionally where to report their progress to which
+	// ends up being a Task struct itself
+	Job[T any] struct {
+		Payload T
+		Task    *Task
+	}
 )
+
+func NewTracker() *Tracker {
+	return &Tracker{}
+}
 
 // AddTask registers a Task and subsequently returns a pointer to it
 func (t *Tracker) AddTask(file string) *Task {

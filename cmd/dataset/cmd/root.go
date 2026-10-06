@@ -18,6 +18,7 @@ import (
 	"pgcr-processing-service/internal/db"
 	"pgcr-processing-service/internal/mapper"
 	"pgcr-processing-service/internal/pubsub"
+	// "pgcr-processing-service/internal/telemetry"
 	ui "pgcr-processing-service/internal/tui"
 	"pgcr-processing-service/internal/types/bungie"
 	"pgcr-processing-service/internal/types/manifest"
@@ -87,6 +88,7 @@ dataset`,
 
 			g, groupCtx := errgroup.WithContext(ctx)
 
+			// tracker := telemetry.NewTracker()
 			// Discover all .zst files before anything
 			// This cannot fail, otherwise everything goes to shit
 			fileWalker := walker.NewFileWalker(opts.RootDir,
