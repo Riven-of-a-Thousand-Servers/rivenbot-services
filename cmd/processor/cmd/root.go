@@ -16,6 +16,7 @@ import (
 	"pgcr-processing-service/internal/mapper"
 	"pgcr-processing-service/internal/pipeline"
 	"pgcr-processing-service/internal/rabbitmq"
+	"pgcr-processing-service/internal/telemetry"
 	"pgcr-processing-service/internal/types/bungie"
 	"pgcr-processing-service/internal/types/manifest"
 	"pgcr-processing-service/internal/utils"
@@ -59,10 +60,10 @@ func newProcessCommand() *cobra.Command {
 			defer rabbitmq.Conn.Close()
 
 			// Switch if Noop is passed in
-			var itemWriter chainmorph.ItemWriter[bungie.PostGameCarnageReport]
+			var itemWriter chainmorph.ItemWriter[telemetry.Job[bungie.PostGameCarnageReport]]
 			switch {
 			case opts.Noop:
-				itemWriter = writer.NoOpProcessor[bungie.PostGameCarnageReport]()
+				itemWriter = writer.NoOpProcessor[telemetry.Job[bungie.PostGameCarnageReport]]()
 			default:
 				// Check for docker secret notation, e.g., /run/secret/${my_secret}
 				if strings.HasPrefix(opts.DatasourceUrl, "/") {

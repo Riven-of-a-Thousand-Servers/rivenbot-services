@@ -16,6 +16,20 @@ type Delivery[T constraints.Bytes] struct {
 	Nack    func(requeue bool) error
 }
 
+// DS = DataSet
+func emptyDeliveryDS[T constraints.Bytes](payload T) Delivery[T] {
+	return Delivery[T]{
+		Payload: payload,
+		Headers: map[string]any{},
+		Ack: func() error {
+			return nil
+		},
+		Nack: func(requeue bool) error {
+			return nil
+		},
+	}
+}
+
 // Consumer represents any construct that relies on an external source
 // of information that needs to be processed by various goroutines,
 // usually involves I/O operations such as network calls or file operations

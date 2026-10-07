@@ -89,6 +89,7 @@ func (i *rabbitProducerCloser[T]) Produce(ctx context.Context, item T) error {
 
 // Instantiate a queue
 // The name parameter declares the name of the consumer
+// TODO: Instead of sending consumer.Delivery[T], send this wrapped in telemetry.Job[T]
 func (r *RabbitMQ[T]) Consume(ctx context.Context) (<-chan consumer.Delivery[T], error) {
 	ch, err := r.Conn.Channel()
 	if err != nil {

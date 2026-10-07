@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"pgcr-processing-service/internal/telemetry"
 	"pgcr-processing-service/internal/types/dataset"
 	"pgcr-processing-service/internal/walker"
 
@@ -20,8 +21,8 @@ func TestStartShouldRunSuccesfully(t *testing.T) {
 		},
 	}
 
-	sut := NewFileConsumer(fileIdx, 12, ConsumerOpts{})
-	consumeCh := make(chan Delivery[dataset.RawContent], 3)
+	sut := NewFileConsumer(fileIdx, telemetry.EmptyTracker(), 12, ConsumerOpts{})
+	consumeCh := make(chan telemetry.Job[Delivery[dataset.RawContent]], 3)
 	sut.ch = consumeCh
 	subCh, unsub := sut.Subscribe()
 	defer unsub()
@@ -45,10 +46,11 @@ func TestLineLimitsShouldBeRespected(t *testing.T) {
 		},
 	}
 
-	sut := NewFileConsumer(fileIdx, 12, ConsumerOpts{
+	sut := NewFileConsumer(fileIdx, telemetry.EmptyTracker(), 12, ConsumerOpts{
 		NumLines: 1,
 	})
-	consumeCh := make(chan Delivery[dataset.RawContent], 3)
+	consumeCh := make(chan telemetry.Job[Delivery[dataset.RawContent]], 3)
+
 	sut.ch = consumeCh
 	subCh, unsub := sut.Subscribe()
 	defer unsub()
@@ -78,11 +80,11 @@ func TestFileLimitsShouldBeRespected(t *testing.T) {
 		},
 	}
 
-	sut := NewFileConsumer(fileIdx, 12, ConsumerOpts{
+	sut := NewFileConsumer(fileIdx, telemetry.EmptyTracker(), 12, ConsumerOpts{
 		NumFiles: 1,
 	})
 
-	consumeCh := make(chan Delivery[dataset.RawContent], 3)
+	consumeCh := make(chan telemetry.Job[Delivery[dataset.RawContent]], 3)
 	sut.ch = consumeCh
 	subCh, unsub := sut.Subscribe()
 	defer unsub()

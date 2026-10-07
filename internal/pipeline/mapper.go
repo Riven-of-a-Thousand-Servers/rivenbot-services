@@ -6,16 +6,21 @@ import (
 	"log/slog"
 
 	"pgcr-processing-service/internal/consumer"
+	"pgcr-processing-service/internal/telemetry"
 	"pgcr-processing-service/internal/types/bungie"
 	"pgcr-processing-service/internal/types/constraints"
 )
 
-func MapRawPgcr[T constraints.Bytes](ctx context.Context, item consumer.Delivery[T]) (bungie.PostGameCarnageReport, error) {
+func MapRawPgcr[T constraints.Bytes](ctx context.Context, item telemetry.Job[consumer.Delivery[T]]) (telemetry.Job[bungie.PostGameCarnageReport], error) {
+	var job telemetry.Job[bungie.PostGameCarnageReport]
 	var out bungie.PostGameCarnageReport
-	if err := json.Unmarshal([]byte(item.Payload), &out); err != nil {
+
+	if err := json.Unmarshal([]byte(item.Skibidi.Payload), &out); err != nil {
 		slog.Error("Error unmarshalling body from message", "error", err)
-		return out, err
+		return job, err
 	}
 
-	return out, nil
+	job.Task = item.Task
+	job.Skibidi = out
+	return job, nil
 }

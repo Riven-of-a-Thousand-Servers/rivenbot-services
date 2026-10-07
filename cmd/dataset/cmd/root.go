@@ -18,7 +18,7 @@ import (
 	"pgcr-processing-service/internal/db"
 	"pgcr-processing-service/internal/mapper"
 	"pgcr-processing-service/internal/pubsub"
-	// "pgcr-processing-service/internal/telemetry"
+	"pgcr-processing-service/internal/telemetry"
 	ui "pgcr-processing-service/internal/tui"
 	"pgcr-processing-service/internal/types/bungie"
 	"pgcr-processing-service/internal/types/manifest"
@@ -88,7 +88,9 @@ dataset`,
 
 			g, groupCtx := errgroup.WithContext(ctx)
 
-			// tracker := telemetry.NewTracker()
+			// Telemetry struct (very important for the UI)
+			tracker := telemetry.EmptyTracker()
+
 			// Discover all .zst files before anything
 			// This cannot fail, otherwise everything goes to shit
 			fileWalker := walker.NewFileWalker(opts.RootDir,
@@ -115,7 +117,7 @@ dataset`,
 			eventsCh := make(chan tea.Msg, EventThroughput)
 			go publishEventsToTea(groupCtx, program, eventsCh)
 
-			datasetConsumer := consumer.NewFileConsumer(files,
+			datasetConsumer := consumer.NewFileConsumer(files, tracker,
 				DatasetBrokerSize,
 				consumer.ConsumerOpts{
 					NumFiles: opts.NumFiles,
@@ -136,10 +138,10 @@ dataset`,
 			}
 
 			mapper := mapper.New(cache)
-			var itemWriter chainmorph.ItemWriter[bungie.PostGameCarnageReport]
+			var itemWriter chainmorph.ItemWriter[telemetry.Job[bungie.PostGameCarnageReport]]
 			switch {
 			case opts.Noop:
-				itemWriter = writer.NoOpProcessor[bungie.PostGameCarnageReport]()
+				itemWriter = writer.NoOpProcessor[telemetry.Job[bungie.PostGameCarnageReport]]()
 			default:
 				conn, err := db.Connect(groupCtx, opts.DbUrl)
 				if err != nil {

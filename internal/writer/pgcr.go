@@ -7,6 +7,7 @@ import (
 
 	"pgcr-processing-service/internal/db"
 	"pgcr-processing-service/internal/mapper"
+	"pgcr-processing-service/internal/telemetry"
 	"pgcr-processing-service/internal/types/bungie"
 	pgcrs "pgcr-processing-service/internal/types/bungie"
 )
@@ -35,31 +36,31 @@ func NewPgcrWriter(db *sql.DB,
 // 2. Destiny Player data
 // 3. Weapon Information
 // 4. Instance Information
-func (w *PgcrWriter) Write(ctx context.Context, pgcr bungie.PostGameCarnageReport) error {
-	instanceId := pgcr.ActivityDetails.InstanceId
-	slog.Info("Processing pgcr", "pgcr", pgcr.ActivityDetails.InstanceId)
+func (w *PgcrWriter) Write(ctx context.Context, job telemetry.Job[bungie.PostGameCarnageReport]) error {
+	instanceId := job.Skibidi.ActivityDetails.InstanceId
+	slog.Info("Processing pgcr", "pgcr", job.Skibidi.ActivityDetails.InstanceId)
 
-	if err := w.saveBlob(ctx, pgcr); err != nil {
+	if err := w.saveBlob(ctx, job.Skibidi); err != nil {
 		slog.Error("Failed to save blob", "pgcr", instanceId, "error", err)
 		return err
 	}
 
-	if err := w.savePlayers(ctx, pgcr); err != nil {
+	if err := w.savePlayers(ctx, job.Skibidi); err != nil {
 		slog.Error("Failed to save destiny 2 players", "pgcr", instanceId, "error", err)
 	}
 
 	// TODO: We COULD theoretically get all weapons before processing PGCRs
-	if err := w.saveWeapons(ctx, pgcr); err != nil {
+	if err := w.saveWeapons(ctx, job.Skibidi); err != nil {
 		slog.Error("Failed to save weapons", "pgcr", instanceId, "error", err)
 		return err
 	}
 
-	if err := w.saveInstance(ctx, pgcr); err != nil {
+	if err := w.saveInstance(ctx, job.Skibidi); err != nil {
 		slog.Error("Failed to save instance", "pgcr", instanceId, "error", err)
 		return err
 	}
 
-	slog.Info("Finished processing pgcr", "pgcr", pgcr.ActivityDetails.InstanceId)
+	slog.Info("Finished processing pgcr", "pgcr", job.Skibidi.ActivityDetails.InstanceId)
 	return nil
 }
 

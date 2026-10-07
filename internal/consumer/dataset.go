@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"pgcr-processing-service/internal/pubsub"
+	"pgcr-processing-service/internal/telemetry"
 	"pgcr-processing-service/internal/types/dataset"
 	"pgcr-processing-service/internal/walker"
 
@@ -32,25 +33,32 @@ type File struct {
 
 type FileConsumer struct {
 	*pubsub.Broker[File]
-	FileIndex walker.FileIndex
-	once      sync.Once
-	ch        chan Delivery[dataset.RawContent]
-	numFiles  int
-	numLines  int
+	fileIndex walker.FileIndex
+	tracker   *telemetry.Tracker
+
+	once     sync.Once
+	ch       chan telemetry.Job[Delivery[dataset.RawContent]]
+	numFiles int
+	numLines int
 }
 
-func NewFileConsumer(idx walker.FileIndex, brokerSize int, opts ConsumerOpts) *FileConsumer {
+func NewFileConsumer(idx walker.FileIndex,
+	tracker *telemetry.Tracker,
+	brokerSize int,
+	opts ConsumerOpts,
+) *FileConsumer {
 	return &FileConsumer{
-		FileIndex: idx,
+		fileIndex: idx,
+		tracker:   tracker,
 		Broker:    pubsub.NewBroker[File](brokerSize),
 		numFiles:  opts.NumFiles,
 		numLines:  opts.NumLines,
 	}
 }
 
-func (c *FileConsumer) Consume(ctx context.Context) (<-chan Delivery[dataset.RawContent], error) {
+func (c *FileConsumer) Consume(ctx context.Context) (<-chan telemetry.Job[Delivery[dataset.RawContent]], error) {
 	c.once.Do(func() {
-		c.ch = make(chan Delivery[dataset.RawContent])
+		c.ch = make(chan telemetry.Job[Delivery[dataset.RawContent]])
 		go c.Start(ctx)
 	})
 
@@ -61,12 +69,14 @@ func (c *FileConsumer) Start(ctx context.Context) error {
 	defer close(c.ch)
 
 	fileCount := 0
-	for _, entry := range c.FileIndex {
+	for _, entry := range c.fileIndex {
 		if c.numFiles > 0 && fileCount >= c.numFiles {
 			break
 		}
 
-		if err := c.setupFile(ctx, entry); err != nil {
+		task := c.tracker.AddTask(entry.Filename)
+		task.StartedAt = time.Now()
+		if err := c.setupFile(ctx, entry, task); err != nil {
 			if errors.Is(err, context.Canceled) {
 				slog.Info("Consumer stopped: context cancelled")
 				return err
@@ -75,14 +85,13 @@ func (c *FileConsumer) Start(ctx context.Context) error {
 			slog.Error("Error scanning file", "path", entry.Path, "error", err)
 			return err
 		}
-		fileCount++
+		task.FinishedAt = time.Now()
 	}
 
 	return nil
 }
 
-func (c *FileConsumer) setupFile(ctx context.Context, entry walker.FileEntry) error {
-	start := time.Now()
+func (c *FileConsumer) setupFile(ctx context.Context, entry walker.FileEntry, task *telemetry.Task) error {
 	slog.Info("Starting to setup file for consumption", "file", entry.Filename)
 	file, err := os.Open(entry.Path)
 	if err != nil {
@@ -104,13 +113,7 @@ func (c *FileConsumer) setupFile(ctx context.Context, entry walker.FileEntry) er
 	scanner := bufio.NewScanner(decoder)
 	scanner.Buffer(buf, maxSize)
 
-	c.Publish(pubsub.FileStarted, File{
-		RowsDone: 0,
-		Filename: entry.Filename,
-		Elapsed:  time.Since(start),
-	})
-
-	if err := c.scanLines(ctx, scanner, entry); err != nil {
+	if err := c.scanLines(ctx, scanner, entry, task); err != nil {
 		return err
 	}
 
@@ -118,16 +121,10 @@ func (c *FileConsumer) setupFile(ctx context.Context, entry walker.FileEntry) er
 		return err
 	}
 
-	c.Publish(pubsub.FileCompleted, File{
-		RowsDone: 10_000_000,
-		Filename: file.Name(),
-		Elapsed:  time.Since(start),
-	})
-
 	return nil
 }
 
-func (c *FileConsumer) scanLines(ctx context.Context, scanner *bufio.Scanner, entry walker.FileEntry) error {
+func (c *FileConsumer) scanLines(ctx context.Context, scanner *bufio.Scanner, entry walker.FileEntry, task *telemetry.Task) error {
 	lineCount := 0
 
 ScanLoop:
@@ -141,28 +138,17 @@ ScanLoop:
 			}
 
 			payload := dataset.RawContent(scanner.Bytes())
+			delivery := emptyDeliveryDS(payload)
+			Job := telemetry.Job[Delivery[dataset.RawContent]]{
+				Task:    task,
+				Skibidi: delivery,
+			}
 
 			select {
-			case c.ch <- Delivery[dataset.RawContent]{
-				Payload: payload,
-				Ack: func() error {
-					return nil
-				},
-				Nack: func(requeue bool) error {
-					return nil
-				},
-				Headers: map[string]any{
-					"source": "dataset",
-				},
-			}:
+			case c.ch <- Job:
 			case <-ctx.Done():
 				return ctx.Err()
 			}
-
-			c.Publish(pubsub.FileProgress, File{
-				RowsDone: lineCount,
-				Filename: entry.Filename,
-			})
 		}
 		lineCount++
 	}
