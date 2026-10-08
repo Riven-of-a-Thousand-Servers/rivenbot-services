@@ -15,6 +15,7 @@ func FilterRaids(item telemetry.Job[bungie.PostGameCarnageReport]) bool {
 	if item.Skibidi.ActivityDetails.Mode == 4 {
 		return true
 	}
+
 	item.Task.Skipped.Add(1)
 	return false
 }

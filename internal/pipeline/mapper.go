@@ -8,10 +8,9 @@ import (
 	"pgcr-processing-service/internal/consumer"
 	"pgcr-processing-service/internal/telemetry"
 	"pgcr-processing-service/internal/types/bungie"
-	"pgcr-processing-service/internal/types/constraints"
 )
 
-func MapRawPgcr[T constraints.Bytes](ctx context.Context, item telemetry.Job[consumer.Delivery[T]]) (telemetry.Job[bungie.PostGameCarnageReport], error) {
+func MapRawPgcr[T ~[]byte](ctx context.Context, item telemetry.Job[consumer.Delivery[T]]) (telemetry.Job[bungie.PostGameCarnageReport], error) {
 	var job telemetry.Job[bungie.PostGameCarnageReport]
 	var out bungie.PostGameCarnageReport
 
@@ -20,7 +19,9 @@ func MapRawPgcr[T constraints.Bytes](ctx context.Context, item telemetry.Job[con
 		return job, err
 	}
 
-	job.Task = item.Task
-	job.Skibidi = out
+	job = telemetry.Job[bungie.PostGameCarnageReport]{
+		Skibidi: out,
+		Task:    item.Task,
+	}
 	return job, nil
 }

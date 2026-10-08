@@ -7,14 +7,16 @@ import (
 
 	"pgcr-processing-service/internal/consumer"
 	"pgcr-processing-service/internal/producer"
+	"pgcr-processing-service/internal/telemetry"
 	"pgcr-processing-service/internal/types/constraints"
 
 	"github.com/rabbitmq/amqp091-go"
 )
 
 type RabbitMQ[T constraints.Bytes] struct {
-	Conn  *amqp091.Connection
-	Queue amqp091.Queue
+	Tracker *telemetry.Tracker
+	Conn    *amqp091.Connection
+	Queue   amqp091.Queue
 }
 
 type rabbitProducerCloser[T any] struct {
@@ -89,8 +91,7 @@ func (i *rabbitProducerCloser[T]) Produce(ctx context.Context, item T) error {
 
 // Instantiate a queue
 // The name parameter declares the name of the consumer
-// TODO: Instead of sending consumer.Delivery[T], send this wrapped in telemetry.Job[T]
-func (r *RabbitMQ[T]) Consume(ctx context.Context) (<-chan consumer.Delivery[T], error) {
+func (r *RabbitMQ[T]) Consume(ctx context.Context) (<-chan telemetry.Job[consumer.Delivery[T]], error) {
 	ch, err := r.Conn.Channel()
 	if err != nil {
 		slog.Error("Failed to open amqp channel for consumer", "error", err)
@@ -103,7 +104,7 @@ func (r *RabbitMQ[T]) Consume(ctx context.Context) (<-chan consumer.Delivery[T],
 		return nil, err
 	}
 
-	out := make(chan consumer.Delivery[T])
+	out := make(chan telemetry.Job[consumer.Delivery[T]])
 	go func() {
 		defer close(out)
 		defer ch.Close()
@@ -129,9 +130,14 @@ func (r *RabbitMQ[T]) Consume(ctx context.Context) (<-chan consumer.Delivery[T],
 					Ack:     func() error { return d.Ack(false) },
 					Nack:    func(requeue bool) error { return d.Nack(false, requeue) },
 				}
+				task := r.Tracker.AddTask("skibidi task")
+				job := telemetry.Job[consumer.Delivery[T]]{
+					Task:    task,
+					Skibidi: delivery,
+				}
 
 				select {
-				case out <- delivery:
+				case out <- job:
 				case <-ctx.Done():
 					return
 				}
