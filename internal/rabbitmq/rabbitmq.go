@@ -132,8 +132,8 @@ func (r *RabbitMQ[T]) Consume(ctx context.Context) (<-chan telemetry.Job[consume
 				}
 				task := r.Tracker.AddTask("skibidi task")
 				job := telemetry.Job[consumer.Delivery[T]]{
-					Task:    task,
-					Skibidi: delivery,
+					Task: task,
+					ToDo: delivery,
 				}
 
 				select {

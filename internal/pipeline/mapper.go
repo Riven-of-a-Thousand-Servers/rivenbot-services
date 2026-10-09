@@ -14,14 +14,14 @@ func MapRawPgcr[T ~[]byte](ctx context.Context, item telemetry.Job[consumer.Deli
 	var job telemetry.Job[bungie.PostGameCarnageReport]
 	var out bungie.PostGameCarnageReport
 
-	if err := json.Unmarshal([]byte(item.Skibidi.Payload), &out); err != nil {
+	if err := json.Unmarshal([]byte(item.ToDo.Payload), &out); err != nil {
 		slog.Error("Error unmarshalling body from message", "error", err)
 		return job, err
 	}
 
 	job = telemetry.Job[bungie.PostGameCarnageReport]{
-		Skibidi: out,
-		Task:    item.Task,
+		ToDo: out,
+		Task: item.Task,
 	}
 	return job, nil
 }

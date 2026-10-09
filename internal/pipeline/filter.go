@@ -12,7 +12,7 @@ const (
 )
 
 func FilterRaids(item telemetry.Job[bungie.PostGameCarnageReport]) bool {
-	if item.Skibidi.ActivityDetails.Mode == 4 {
+	if item.ToDo.ActivityDetails.Mode == 4 {
 		return true
 	}
 

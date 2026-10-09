@@ -113,7 +113,7 @@ func (c *FileConsumer) setupFile(ctx context.Context, entry walker.FileEntry, ta
 	scanner := bufio.NewScanner(decoder)
 	scanner.Buffer(buf, maxSize)
 
-	if err := c.scanLines(ctx, scanner, entry, task); err != nil {
+	if err := c.scanLines(ctx, scanner, task); err != nil {
 		return err
 	}
 
@@ -124,7 +124,7 @@ func (c *FileConsumer) setupFile(ctx context.Context, entry walker.FileEntry, ta
 	return nil
 }
 
-func (c *FileConsumer) scanLines(ctx context.Context, scanner *bufio.Scanner, entry walker.FileEntry, task *telemetry.Task) error {
+func (c *FileConsumer) scanLines(ctx context.Context, scanner *bufio.Scanner, task *telemetry.Task) error {
 	lineCount := 0
 
 ScanLoop:
@@ -140,8 +140,8 @@ ScanLoop:
 			payload := dataset.RawContent(scanner.Bytes())
 			delivery := emptyDeliveryDS(payload)
 			Job := telemetry.Job[Delivery[dataset.RawContent]]{
-				Task:    task,
-				Skibidi: delivery,
+				Task: task,
+				ToDo: delivery,
 			}
 
 			select {

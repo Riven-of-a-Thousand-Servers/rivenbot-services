@@ -31,23 +31,55 @@ type (
 		FinishedAt time.Time
 	}
 
+	TaskView struct {
+		Filename   string
+		LinesTotal int
+		LinesDone  int
+		State      int32
+		BytesRead  int64
+		LinesRead  int32
+		Inserted   int32
+		Skipped    int32
+		Errored    int32
+
+		StartedAt  time.Time
+		FinishedAt time.Time
+	}
+
 	GaugeFunc func(name, unit string) (len, cap int)
 
 	Tracker struct {
-		mu     sync.RWMutex
-		nextId int
-		queues []queueEntry
-		tasks  []*Task
+		bufferSize int
+		mu         sync.RWMutex
+		nextId     int
+		queues     []queueEntry
+		tasks      []*Task
 	}
 
 	// Job represents the task a Task Worker is tasked with doing
 	// and additionally where to report their progress to which
 	// ends up being a Task struct itself
 	Job[T any] struct {
-		Skibidi T
-		Task    *Task
+		ToDo T
+		Task *Task
 	}
 )
+
+func (t *Task) View() TaskView {
+	return TaskView{
+		Filename:   t.Filename,
+		LinesTotal: t.LinesTotal,
+		LinesDone:  t.LinesDone,
+		State:      t.State.Load(),
+		BytesRead:  t.BytesRead.Load(),
+		LinesRead:  t.LinesRead.Load(),
+		Inserted:   t.Inserted.Load(),
+		Skipped:    t.Skipped.Load(),
+		Errored:    t.Errored.Load(),
+		StartedAt:  t.StartedAt,
+		FinishedAt: t.FinishedAt,
+	}
+}
 
 func EmptyTracker() *Tracker {
 	return &Tracker{}
@@ -63,11 +95,21 @@ func (t *Tracker) AddTask(file string) *Task {
 	return task
 }
 
-func (t *Tracker) SnapshotTasks() []*Task {
+func (t *Tracker) SnapshotTasks() []TaskView {
 	t.mu.RLock()
 	entries := slices.Clone(t.tasks)
 	t.mu.RUnlock()
-	return entries
+
+	// Ring buffer will only contain entries the top N entries that haven't finished
+	// and if they did they will only stay for 10 seconds before the next one is fetched
+	ringBuffer := make([]TaskView, t.bufferSize)
+	for i := range t.bufferSize {
+		curr := entries[i]
+		if curr.FinishedAt.IsZero() || curr.FinishedAt.Before(time.Now().Add(10*time.Second)) {
+			ringBuffer = append(ringBuffer, curr.View())
+		}
+	}
+	return ringBuffer
 }
 
 // RegisterQueue adds a new queue representing an active Go channel
