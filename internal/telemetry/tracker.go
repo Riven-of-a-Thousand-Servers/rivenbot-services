@@ -114,7 +114,10 @@ func (t *Tracker) AddTask(file string, linesTotal int) *Task {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	task := &Task{Filename: file, LinesTotal: linesTotal}
+	task := &Task{
+		Filename:   file,
+		LinesTotal: linesTotal,
+	}
 	t.tasks = append(t.tasks, task)
 	return task
 }
@@ -126,12 +129,9 @@ func (t *Tracker) SnapshotTasks() []TaskView {
 
 	// Ring buffer will only contain entries the top N entries that haven't finished
 	// and if they did they will only stay for 10 seconds before the next one is fetched
-	ringBuffer := make([]TaskView, t.bufferSize)
-	for i := range t.bufferSize {
-		curr := entries[i]
-		if curr.FinishedAt.IsZero() || curr.FinishedAt.Before(time.Now().Add(10*time.Second)) {
-			ringBuffer = append(ringBuffer, curr.View())
-		}
+	ringBuffer := make([]TaskView, 0, len(entries))
+	for _, task := range entries {
+		ringBuffer = append(ringBuffer, task.View())
 	}
 	return ringBuffer
 }
@@ -181,16 +181,17 @@ func (t *Task) SetErrored() TaskState {
 }
 
 func (t *Task) IncrementErrors() int32 {
-	t.Errored.Add(1)
-	return t.Errored.Load()
+	return t.Errored.Add(1)
 }
 
 func (t *Task) IncrementInserted() int32 {
-	t.Inserted.Add(1)
-	return t.Inserted.Load()
+	return t.Inserted.Add(1)
 }
 
 func (t *Task) IncrementLinesRead() int32 {
-	t.LinesRead.Add(1)
-	return t.LinesRead.Load()
+	return t.LinesRead.Add(1)
+}
+
+func (t *Task) IncrementSkipped() int32 {
+	return t.Skipped.Add(1)
 }

@@ -8,12 +8,11 @@ import (
 	"pgcr-processing-service/internal/consumer"
 	"pgcr-processing-service/internal/producer"
 	"pgcr-processing-service/internal/telemetry"
-	"pgcr-processing-service/internal/types/constraints"
 
 	"github.com/rabbitmq/amqp091-go"
 )
 
-type RabbitMQ[T constraints.Bytes] struct {
+type RabbitMQ[T ~[]byte] struct {
 	Tracker *telemetry.Tracker
 	Conn    *amqp091.Connection
 	Queue   amqp091.Queue
@@ -24,7 +23,7 @@ type rabbitProducerCloser[T any] struct {
 	queue string
 }
 
-func New[T constraints.Bytes](queueName, url string) (*RabbitMQ[T], error) {
+func New[T ~[]byte](queueName, url string) (*RabbitMQ[T], error) {
 	conn, err := amqp091.Dial(url)
 	if err != nil {
 		slog.Error("Error dialing RabbitMQ", "Error", err)

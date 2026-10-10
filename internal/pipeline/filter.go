@@ -16,6 +16,6 @@ func FilterRaids(item telemetry.Job[bungie.PostGameCarnageReport]) bool {
 		return true
 	}
 
-	item.Task.Skipped.Add(1)
+	item.Task.IncrementSkipped()
 	return false
 }

@@ -2,8 +2,6 @@ package consumer
 
 import (
 	"context"
-
-	"pgcr-processing-service/internal/types/constraints"
 )
 
 // Represents each delivery item from amqp.delivery
@@ -33,6 +31,6 @@ func DefaultDelivery[T ~[]byte](payload T) Delivery[T] {
 // Consumer represents any construct that relies on an external source
 // of information that needs to be processed by various goroutines,
 // usually involves I/O operations such as network calls or file operations
-type Consumer[T constraints.Bytes] interface {
+type Consumer[T ~[]byte] interface {
 	Consume(context.Context) (<-chan Delivery[T], error)
 }

@@ -83,7 +83,7 @@ dataset`,
 			cleanup = append(cleanup, logFile.Close)
 
 			slog.SetDefault(slog.New(slog.NewJSONHandler(logFile, &slog.HandlerOptions{
-				Level: slog.LevelInfo.Level(),
+				Level: slog.LevelDebug.Level(),
 			})))
 
 			g, groupCtx := errgroup.WithContext(ctx)
