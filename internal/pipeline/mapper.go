@@ -16,6 +16,7 @@ func MapRawPgcr[T ~[]byte](ctx context.Context, item telemetry.Job[consumer.Deli
 
 	if err := json.Unmarshal([]byte(item.ToDo.Payload), &out); err != nil {
 		slog.Error("Error unmarshalling body from message", "error", err)
+		item.Task.IncrementErrors()
 		return job, err
 	}
 

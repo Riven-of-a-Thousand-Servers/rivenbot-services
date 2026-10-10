@@ -9,15 +9,15 @@ import (
 // Represents each delivery item from amqp.delivery
 // we wrap around Ack and Nack functionality so we don't lose these
 // when unwrapping the types
-type Delivery[T constraints.Bytes] struct {
+type Delivery[T ~[]byte] struct {
 	Payload T
 	Headers map[string]any
 	Ack     func() error
 	Nack    func(requeue bool) error
 }
 
-// DS = DataSet
-func emptyDeliveryDS[T constraints.Bytes](payload T) Delivery[T] {
+// Default delivery with no Headers, Empty ACK and NACK callback functions
+func DefaultDelivery[T ~[]byte](payload T) Delivery[T] {
 	return Delivery[T]{
 		Payload: payload,
 		Headers: map[string]any{},

@@ -105,7 +105,7 @@ dataset`,
 			}
 
 			// Setup Tea.Program before cache start prepopulating so we can capture events
-			program := tea.NewProgram(ui.NewModel(cancel), tea.WithContext(groupCtx))
+			program := tea.NewProgram(ui.NewModel(tracker, cancel), tea.WithContext(groupCtx))
 			g.Go(func() error {
 				_, err := program.Run()
 				return err

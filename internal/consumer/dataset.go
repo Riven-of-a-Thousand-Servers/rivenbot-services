@@ -17,7 +17,10 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
-const maxSize = 1024 * 1024 * 20 // 20 MBs
+const (
+	maxSize      = 1024 * 1024 * 20 // 20 MBs
+	linesPerFile = 10_000_000
+)
 
 type ConsumerOpts struct {
 	NumFiles int
@@ -74,18 +77,20 @@ func (c *FileConsumer) Start(ctx context.Context) error {
 			break
 		}
 
-		task := c.tracker.AddTask(entry.Filename)
-		task.StartedAt = time.Now()
+		task := c.tracker.AddTask(entry.Filename, linesPerFile)
+		task.SetStarted()
 		if err := c.setupFile(ctx, entry, task); err != nil {
 			if errors.Is(err, context.Canceled) {
 				slog.Info("Consumer stopped: context cancelled")
+				task.SetFinished()
 				return err
 			}
 
 			slog.Error("Error scanning file", "path", entry.Path, "error", err)
+			task.SetErrored()
 			return err
 		}
-		task.FinishedAt = time.Now()
+		task.SetFinished()
 	}
 
 	return nil
@@ -138,11 +143,15 @@ ScanLoop:
 			}
 
 			payload := dataset.RawContent(scanner.Bytes())
-			delivery := emptyDeliveryDS(payload)
+			task.BytesRead.Add(payload.Len())
+
+			delivery := DefaultDelivery(payload)
 			Job := telemetry.Job[Delivery[dataset.RawContent]]{
 				Task: task,
 				ToDo: delivery,
 			}
+
+			task.IncrementLinesRead()
 
 			select {
 			case c.ch <- Job:

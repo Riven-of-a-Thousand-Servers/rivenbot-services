@@ -130,7 +130,7 @@ func (r *RabbitMQ[T]) Consume(ctx context.Context) (<-chan telemetry.Job[consume
 					Ack:     func() error { return d.Ack(false) },
 					Nack:    func(requeue bool) error { return d.Nack(false, requeue) },
 				}
-				task := r.Tracker.AddTask("skibidi task")
+				task := r.Tracker.AddTask("skibidi task", 1)
 				job := telemetry.Job[consumer.Delivery[T]]{
 					Task: task,
 					ToDo: delivery,

@@ -7,6 +7,13 @@ import (
 	"time"
 )
 
+const (
+	Queued TaskState = iota + 1
+	Started
+	Errored
+	Finished
+)
+
 type (
 	queueEntry struct {
 		id        int
@@ -14,6 +21,8 @@ type (
 		unit      string
 		gaugeFunc GaugeFunc
 	}
+
+	TaskState int32
 
 	// Represents the atomic unit of work for the TUI
 	// which is processing a zst-compressed file
@@ -35,7 +44,7 @@ type (
 		Filename   string
 		LinesTotal int
 		LinesDone  int
-		State      int32
+		State      TaskState
 		BytesRead  int64
 		LinesRead  int32
 		Inserted   int32
@@ -65,12 +74,27 @@ type (
 	}
 )
 
+func (t TaskState) String() string {
+	switch t {
+	case Started:
+		return "Started"
+	case Queued:
+		return "Queued"
+	case Errored:
+		return "Errored"
+	case Finished:
+		return "Finished"
+	default:
+		return ""
+	}
+}
+
 func (t *Task) View() TaskView {
 	return TaskView{
 		Filename:   t.Filename,
 		LinesTotal: t.LinesTotal,
 		LinesDone:  t.LinesDone,
-		State:      t.State.Load(),
+		State:      TaskState(t.State.Load()),
 		BytesRead:  t.BytesRead.Load(),
 		LinesRead:  t.LinesRead.Load(),
 		Inserted:   t.Inserted.Load(),
@@ -86,11 +110,11 @@ func EmptyTracker() *Tracker {
 }
 
 // AddTask registers a Task and subsequently returns a pointer to it
-func (t *Tracker) AddTask(file string) *Task {
+func (t *Tracker) AddTask(file string, linesTotal int) *Task {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	task := &Task{Filename: file, StartedAt: time.Now()}
+	task := &Task{Filename: file, LinesTotal: linesTotal}
 	t.tasks = append(t.tasks, task)
 	return task
 }
@@ -127,4 +151,46 @@ func (t *Tracker) RegisterQueue(name, unit string, fn GaugeFunc) (unregister fun
 			return e.id == id
 		})
 	}
+}
+
+func (t *Task) SetStarted() TaskState {
+	state := Started
+	t.State.Store(int32(Started))
+	t.StartedAt = time.Now()
+	return state
+}
+
+func (t *Task) SetQueued() TaskState {
+	state := Queued
+	t.State.Store(int32(Queued))
+	return state
+}
+
+func (t *Task) SetFinished() TaskState {
+	state := Finished
+	t.State.Store(int32(state))
+	t.FinishedAt = time.Now()
+	return state
+}
+
+func (t *Task) SetErrored() TaskState {
+	state := Errored
+	t.State.Store(int32(state))
+	t.FinishedAt = time.Now()
+	return state
+}
+
+func (t *Task) IncrementErrors() int32 {
+	t.Errored.Add(1)
+	return t.Errored.Load()
+}
+
+func (t *Task) IncrementInserted() int32 {
+	t.Inserted.Add(1)
+	return t.Inserted.Load()
+}
+
+func (t *Task) IncrementLinesRead() int32 {
+	t.LinesRead.Add(1)
+	return t.LinesRead.Load()
 }

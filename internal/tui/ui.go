@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"pgcr-processing-service/internal/cache"
-	"pgcr-processing-service/internal/consumer"
 	"pgcr-processing-service/internal/pubsub"
+	"pgcr-processing-service/internal/telemetry"
 
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/table"
@@ -17,7 +17,7 @@ import (
 
 const (
 	rowsPerFile  = 10_000_000
-	renderPeriod = 500 * time.Millisecond
+	renderPeriod = 250 * time.Millisecond
 )
 
 type uiState int
@@ -29,13 +29,13 @@ const (
 )
 
 type (
-	HeaderTickMsg     time.Time
-	BodyRenderTickMsg time.Time
+	HeaderTickMsg time.Time
+	RenderTick    time.Time
 )
 
 func renderTick() tea.Cmd {
 	return tea.Tick(renderPeriod, func(t time.Time) tea.Msg {
-		return BodyRenderTickMsg{}
+		return RenderTick(t)
 	})
 }
 
@@ -45,36 +45,21 @@ func headerTick() tea.Cmd {
 	})
 }
 
-type fileState struct {
-	rowsDone  int
-	rowsTotal int
-	startedAt time.Time
-	errCount  int
-}
-
-// TODO: Add lipgloss composite panes to visualize logs in the same pane as the
-// table for the file progress
 type Model struct {
-	// Switches from Database loading, cache warming, and actual processing
-	state uiState
+	tracker *telemetry.Tracker
+	state   uiState
 
 	// Cache warming state
 	spinner       spinner.Model
 	cacheStageMsg string
 
 	tbl        table.Model
-	inFlight   map[string]*fileState
-	startedAt  time.Time
-	filesTotal int
-	filesDone  int
-	errored    int
 	dirty      bool
-	done       bool
 	quitting   bool
 	cancelFunc context.CancelFunc
 }
 
-func NewModel(cancelFunc context.CancelFunc) Model {
+func NewModel(tracker *telemetry.Tracker, cancelFunc context.CancelFunc) Model {
 	spinnerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 	spinner := spinner.New(
 		spinner.WithSpinner(spinner.Dot),
@@ -83,9 +68,7 @@ func NewModel(cancelFunc context.CancelFunc) Model {
 	return Model{
 		spinner:    spinner,
 		state:      cacheWarming,
-		inFlight:   make(map[string]*fileState),
 		tbl:        newTable(),
-		startedAt:  time.Now(),
 		cancelFunc: cancelFunc,
 	}
 }
@@ -108,14 +91,12 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
-	case BodyRenderTickMsg:
+	case RenderTick:
 		if m.dirty {
-			m.tbl.SetRows(m.tableRows())
 			m.dirty = false
 		}
 		cmds = append(cmds, renderTick())
 	case HeaderTickMsg:
-		m.headerView()
 		cmds = append(cmds, headerTick())
 	case tea.KeyPressMsg:
 		switch msg.String() {
@@ -151,34 +132,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cacheStageMsg = fmt.Sprintf("Finished warming up the cache with %d entries", msg.Payload.Size)
 			m.state = datasetProcessing
 		}
-
-	// Broker events related to ui events
-	case pubsub.Event[consumer.File]:
-		switch msg.Type {
-		case pubsub.FileStarted:
-			m.inFlight[msg.Payload.Filename] = &fileState{
-				rowsTotal: rowsPerFile,
-				startedAt: time.Now(),
-			}
-		case pubsub.FileProgress:
-			_, ok := m.inFlight[msg.Payload.Filename]
-			if !ok {
-				m.inFlight[msg.Payload.Filename] = &fileState{
-					rowsTotal: rowsPerFile,
-				}
-			}
-
-			m.inFlight[msg.Payload.Filename].rowsDone = msg.Payload.RowsDone
-			if msg.Payload.Err != nil {
-				m.inFlight[msg.Payload.Filename].errCount++
-			}
-		case pubsub.FileCompleted:
-			delete(m.inFlight, msg.Payload.Filename)
-			m.filesDone++
-			if msg.Payload.Err != nil {
-				m.errored++
-			}
-		}
 		m.dirty = true
 	}
 
@@ -192,7 +145,6 @@ func (m Model) View() tea.View {
 		s += fmt.Sprintf("\n%s %s", m.spinner.View(), m.cacheStageMsg)
 		return tea.NewView(s)
 	case datasetProcessing:
-		return tea.NewView(m.headerView() + "\n" + m.bodyView() + "\n" + m.footerView())
 	default:
 	}
 	return tea.NewView("Unknown state for the dataset process. Exiting.")
@@ -200,58 +152,6 @@ func (m Model) View() tea.View {
 
 func (m Model) footerView() string {
 	return "\n[q/ctrl+c] quit"
-}
-
-func (m Model) bodyView() string {
-	if len(m.inFlight) == 0 && !m.done {
-		return "\nwaiting for workers to start...\n"
-	}
-
-	return baseTableStyle.Render(m.tbl.View())
-}
-
-func (m Model) headerView() string {
-	status := "Processing"
-	if m.done {
-		status = "Done"
-	}
-
-	elapsed := time.Since(m.startedAt).Round(time.Second)
-
-	var totalRowsDone int64
-	for _, fs := range m.inFlight {
-		totalRowsDone += int64(fs.rowsDone)
-	}
-
-	completedRows := int64(m.filesDone) * int64(rowsPerFile)
-	rate := float64(completedRows+totalRowsDone) / max(elapsed.Seconds(), 0.1)
-
-	return gradientTitle(fmt.Sprintf(
-		headerString, status, m.filesDone, m.filesTotal, m.errored, elapsed, rate, len(m.inFlight)))
-}
-
-func (m Model) tableRows() []table.Row {
-	rows := make([]table.Row, 0, len(m.inFlight))
-	for name, state := range m.inFlight {
-		pct := 0.0
-		if state.rowsTotal > 0 {
-			pct = float64(state.rowsDone) / float64(state.rowsTotal)
-		}
-		elapsed := time.Since(state.startedAt)
-		rate := float64(state.rowsDone) / max(elapsed.Seconds(), 0.0001)
-		eta := time.Duration(float64(state.rowsTotal-state.rowsDone)/max(rate, 0.0001)) * time.Second
-
-		rows = append(rows, table.Row{
-			truncate(name, 28),
-			fmt.Sprintf("%.1f%%", pct*100),
-			fmt.Sprintf("%d/%d", state.rowsDone, state.rowsTotal),
-			fmt.Sprintf("%.0f/s", rate),
-			eta.Round(time.Second).String(),
-			fmt.Sprintf("%d", state.errCount),
-		})
-	}
-
-	return rows
 }
 
 func truncate(s string, n int) string {
@@ -264,11 +164,12 @@ func truncate(s string, n int) string {
 func newTable() table.Model {
 	columns := []table.Column{
 		{Title: "File", Width: 30},
-		{Title: "Progress", Width: 12},
-		{Title: "Rows", Width: 20},
-		{Title: "Rate", Width: 12},
-		{Title: "ETA", Width: 10},
+		{Title: "State", Width: 12},
+		{Title: "Lines", Width: 20},
+		{Title: "Inserted", Width: 8},
+		{Title: "Skipped", Width: 8},
 		{Title: "Errors", Width: 8},
+		{Title: "Rate", Width: 12},
 	}
 
 	tbl := table.New(table.WithColumns(columns), table.WithFocused(false), table.WithWidth(100), table.WithHeight(12))
