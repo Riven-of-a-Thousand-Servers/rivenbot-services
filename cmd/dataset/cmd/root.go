@@ -83,13 +83,12 @@ dataset`,
 			cleanup = append(cleanup, logFile.Close)
 
 			slog.SetDefault(slog.New(slog.NewJSONHandler(logFile, &slog.HandlerOptions{
-				Level: slog.LevelDebug.Level(),
+				Level: slog.LevelInfo.Level(),
 			})))
 
 			g, groupCtx := errgroup.WithContext(ctx)
 
-			// Telemetry struct (very important for the UI)
-			tracker := telemetry.EmptyTracker()
+			tracker := telemetry.DefaultTracker()
 
 			// Discover all .zst files before anything
 			// This cannot fail, otherwise everything goes to shit
@@ -123,11 +122,12 @@ dataset`,
 					NumFiles: opts.NumFiles,
 					NumLines: opts.NumLines,
 				})
-			cache := cache.NewInMemoryCache[manifest.Entry](CacheEventsBrokerSize)
+
+			cache := cache.NewInMemoryCache(CacheEventsBrokerSize)
 			setupEvents(ctx, &eventsWg, eventsCh, cache)
 
 			// Prepopulate immediately before instantiating mapper
-			if err = cache.Prepopulate(groupCtx,
+			if err = cache.Init(groupCtx,
 				opts.ApiKey,
 				manifest.InventoryItemDefinition,
 				manifest.ActivityDefinition,
@@ -163,9 +163,6 @@ dataset`,
 				return err
 			}
 
-			setupEvents(ctx, &eventsWg, eventsCh, datasetConsumer)
-
-			// Core-loop
 			for range opts.Goroutines {
 				g.Go(func() error {
 					return chainmorph.From(pipeline.NewChannelReader(ch)).
@@ -210,7 +207,6 @@ func publishEventsToTea(ctx context.Context, program *tea.Program, out <-chan te
 				return
 			}
 
-			slog.Info("Publishing event", "msg", msg)
 			program.Send(msg)
 		}
 	}

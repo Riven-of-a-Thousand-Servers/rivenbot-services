@@ -37,9 +37,6 @@ func NewPgcrWriter(db *sql.DB,
 // 3. Weapon Information
 // 4. Instance Information
 func (w *PgcrWriter) Write(ctx context.Context, job telemetry.Job[bungie.PostGameCarnageReport]) (err error) {
-	instanceId := job.ToDo.ActivityDetails.InstanceId
-	slog.Debug("Processing pgcr", "pgcr", instanceId)
-
 	defer func() {
 		switch {
 		case err != nil:
@@ -51,27 +48,17 @@ func (w *PgcrWriter) Write(ctx context.Context, job telemetry.Job[bungie.PostGam
 	}()
 
 	if err = w.saveBlob(ctx, job.ToDo); err != nil {
-		slog.Error("Failed to save blob", "pgcr", instanceId, "error", err)
 		return err
 	}
 
 	if err = w.savePlayers(ctx, job.ToDo); err != nil {
-		slog.Error("Failed to save destiny 2 players", "pgcr", instanceId, "error", err)
-		return err
-	}
-
-	// TODO: We COULD theoretically get all weapons before processing PGCRs
-	if err = w.saveWeapons(ctx, job.ToDo); err != nil {
-		slog.Error("Failed to save weapons", "pgcr", instanceId, "error", err)
 		return err
 	}
 
 	if err = w.saveInstance(ctx, job.ToDo); err != nil {
-		slog.Error("Failed to save instance", "pgcr", instanceId, "error", err)
 		return err
 	}
 
-	slog.Debug("Finished processing pgcr", "pgcr", instanceId)
 	return nil
 }
 
@@ -99,22 +86,6 @@ func (w *PgcrWriter) saveBlob(ctx context.Context, pgcr bungie.PostGameCarnageRe
 	return w.queries.CreatePgcr(ctx, blob)
 }
 
-func (w *PgcrWriter) saveWeapons(ctx context.Context, pgcr pgcrs.PostGameCarnageReport) error {
-	weapons, err := w.mapper.MapToDBWeapons(ctx, pgcr)
-	if err != nil {
-		return err
-	}
-
-	for _, weapon := range weapons {
-		if err := w.queries.CreateWeapon(ctx, weapon); err != nil {
-			slog.Error("Unable to save weapon", "weaponId", weapon.WeaponHash, "error", err)
-			continue
-		}
-	}
-
-	return nil
-}
-
 // Saves a processed pgcr to the Postgres DB
 func (w *PgcrWriter) saveInstance(ctx context.Context, pgcr bungie.PostGameCarnageReport) error {
 	instanceId := pgcr.ActivityDetails.InstanceId
@@ -129,23 +100,24 @@ func (w *PgcrWriter) saveInstance(ctx context.Context, pgcr bungie.PostGameCarna
 
 	instance, err := w.mapper.MapToDBInstance(pgcr)
 	if err != nil {
-		slog.Error("Failed to map to DB instance", "pgcr", instanceId, "error", err)
+		slog.Error("Failed to map DB instance", "pgcr", instanceId, "error", err)
 		return err
 	}
 
 	if err := qtx.CreateInstance(ctx, instance); err != nil {
-		slog.Error("Failed to save instance to db", "instanceId", pgcr.ActivityDetails.InstanceId, "error", err)
+		slog.Error("Failed to create instance in DB", "instanceId", pgcr.ActivityDetails.InstanceId, "error", err)
 		return err
 	}
 
 	instancePlayers, err := w.mapper.MapToInstancePlayers(pgcr)
 	if err != nil {
+		slog.Error("Failed to map instance players in DB", "pgcr", instanceId, "error", err)
 		return err
 	}
 
 	for _, player := range instancePlayers {
 		if err := qtx.CreateInstancePlayer(ctx, player); err != nil {
-			slog.Error("Failed to create instance player", "pgcr", instanceId, "memId", player.MembershipID, "error", err)
+			slog.Error("Failed to create instance player in DB", "pgcr", instanceId, "memId", player.MembershipID, "error", err)
 			return err
 		}
 		if err := qtx.IncrementPlayerCounts(ctx, db.IncrementPlayerCountsParams{
@@ -160,7 +132,7 @@ func (w *PgcrWriter) saveInstance(ctx context.Context, pgcr bungie.PostGameCarna
 
 	instanceToons, err := w.mapper.MapToInstanceToons(pgcr)
 	if err != nil {
-		slog.Error("Failed to map instance toons", "pgcr", instanceId)
+		slog.Error("Failed to map instance toons", "pgcr", instanceId, "error", err)
 		return err
 	}
 

@@ -21,7 +21,7 @@ func TestStartShouldRunSuccesfully(t *testing.T) {
 		},
 	}
 
-	sut := NewFileConsumer(fileIdx, telemetry.EmptyTracker(), 12, ConsumerOpts{})
+	sut := NewFileConsumer(fileIdx, telemetry.DefaultTracker(), 12, ConsumerOpts{})
 	consumeCh := make(chan telemetry.Job[Delivery[dataset.RawContent]], 3)
 	sut.ch = consumeCh
 	subCh, unsub := sut.Subscribe()
@@ -46,7 +46,7 @@ func TestLineLimitsShouldBeRespected(t *testing.T) {
 		},
 	}
 
-	sut := NewFileConsumer(fileIdx, telemetry.EmptyTracker(), 12, ConsumerOpts{
+	sut := NewFileConsumer(fileIdx, telemetry.DefaultTracker(), 12, ConsumerOpts{
 		NumLines: 1,
 	})
 	consumeCh := make(chan telemetry.Job[Delivery[dataset.RawContent]], 3)
@@ -80,7 +80,7 @@ func TestFileLimitsShouldBeRespected(t *testing.T) {
 		},
 	}
 
-	sut := NewFileConsumer(fileIdx, telemetry.EmptyTracker(), 12, ConsumerOpts{
+	sut := NewFileConsumer(fileIdx, telemetry.DefaultTracker(), 12, ConsumerOpts{
 		NumFiles: 1,
 	})
 

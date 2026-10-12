@@ -105,7 +105,7 @@ func (t *Task) View() TaskView {
 	}
 }
 
-func EmptyTracker() *Tracker {
+func DefaultTracker() *Tracker {
 	return &Tracker{}
 }
 

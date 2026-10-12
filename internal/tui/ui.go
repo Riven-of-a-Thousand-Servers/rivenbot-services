@@ -54,7 +54,9 @@ type Model struct {
 	spinner       spinner.Model
 	cacheStageMsg string
 
-	tbl        table.Model
+	// TODO: This table will belong only to the main-pane from the TUI
+	// However, we still haven't setup panes yet
+	table      table.Model
 	cancelFunc context.CancelFunc
 }
 
@@ -68,7 +70,7 @@ func NewModel(tracker *telemetry.Tracker, cancelFunc context.CancelFunc) Model {
 		tracker:    tracker,
 		spinner:    spinner,
 		state:      cacheWarming,
-		tbl:        newTable(),
+		table:      newTable(),
 		cancelFunc: cancelFunc,
 	}
 }
@@ -99,10 +101,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "esc":
-			if m.tbl.Focused() {
-				m.tbl.Blur()
+			if m.table.Focused() {
+				m.table.Blur()
 			} else {
-				m.tbl.Focused()
+				m.table.Focused()
 			}
 		case "q", "ctrl+c":
 			m.cancelFunc()
@@ -147,8 +149,8 @@ func (m Model) View() tea.View {
 			slog.Debug("Rows", "cell", row)
 			rows = append(rows, row)
 		}
-		m.tbl.SetRows(rows)
-		return tea.NewView(m.tbl.View())
+		m.table.SetRows(rows)
+		return tea.NewView(m.table.View())
 	default:
 	}
 	return tea.NewView("Unknown state for the dataset process. Exiting.")
