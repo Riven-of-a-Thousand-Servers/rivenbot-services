@@ -54,8 +54,6 @@ type Model struct {
 	spinner       spinner.Model
 	cacheStageMsg string
 
-	// TODO: This table will belong only to the main-pane from the TUI
-	// However, we still haven't setup panes yet
 	table      table.Model
 	cancelFunc context.CancelFunc
 }
@@ -70,16 +68,6 @@ func NewModel(tracker *telemetry.Tracker, cancelFunc context.CancelFunc) Model {
 		state:      cacheWarming,
 		table:      newTable(),
 		cancelFunc: cancelFunc,
-	}
-}
-
-func WaitForEvent[T any](ch <-chan T) tea.Cmd {
-	return func() tea.Msg {
-		e, ok := <-ch
-		if !ok {
-			return nil
-		}
-		return e
 	}
 }
 
@@ -140,14 +128,14 @@ func (m Model) View() tea.View {
 		Width(118).
 		Height(20).
 		Border(lipgloss.RoundedBorder(), true).
-		BorderForeground(lipgloss.BrightCyan).
+		BorderForeground(lipgloss.Color("62")).
 		Padding(0)
 
 	logsPane := lipgloss.NewStyle().
 		Width(100).
 		Height(20).
 		Border(lipgloss.RoundedBorder(), true).
-		BorderForeground(lipgloss.BrightCyan).
+		BorderForeground(lipgloss.Color("62")).
 		AlignHorizontal(lipgloss.Left).
 		AlignVertical(lipgloss.Left).
 		Padding(0)
@@ -210,20 +198,20 @@ func truncate(s string, n int) string {
 
 func newTable() table.Model {
 	columns := []table.Column{
-		{Title: "File", Width: 30},
-		{Title: "State", Width: 10},
-		{Title: "Progress", Width: 10},
-		{Title: "Lines Read", Width: 10},
-		{Title: "Bytes Read", Width: 10},
-		{Title: "Inserted", Width: 10},
-		{Title: "Skipped", Width: 10},
-		{Title: "Errored", Width: 10},
+		{Title: PurpleStyle.Render("File"), Width: 24},
+		{Title: PurpleStyle.Render("State"), Width: 10},
+		{Title: PurpleStyle.Render("Progress"), Width: 10},
+		{Title: PurpleStyle.Render("Lines Read"), Width: 10},
+		{Title: PurpleStyle.Render("Bytes Read"), Width: 10},
+		{Title: GreenStyle.Render("Inserted"), Width: 10},
+		{Title: CoolBlueStyle.Render("Skipped"), Width: 10},
+		{Title: RedStyle.Render("Errored"), Width: 10},
 	}
 
-	tbl := table.New(table.WithColumns(columns), table.WithFocused(false))
+	tbl := table.New(table.WithColumns(columns))
 	s := table.DefaultStyles()
 	s.Header.
-		BorderStyle(lipgloss.NormalBorder()).
+		BorderStyle(lipgloss.InnerHalfBlockBorder()).
 		BorderForeground(lipgloss.Color("240")).
 		Bold(true)
 	tbl.SetStyles(s)
