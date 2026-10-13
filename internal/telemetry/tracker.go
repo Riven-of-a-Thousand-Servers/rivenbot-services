@@ -58,11 +58,11 @@ type (
 	GaugeFunc func(name, unit string) (len, cap int)
 
 	Tracker struct {
-		bufferSize int
-		mu         sync.RWMutex
-		nextId     int
-		queues     []queueEntry
-		tasks      []*Task
+		logBuf *RingBuffer
+		mu     sync.RWMutex
+		nextId int
+		queues []queueEntry
+		tasks  []*Task
 	}
 
 	// Job represents the task a Task Worker is tasked with doing
@@ -105,8 +105,10 @@ func (t *Task) View() TaskView {
 	}
 }
 
-func DefaultTracker() *Tracker {
-	return &Tracker{}
+func DefaultTracker(logBuf *RingBuffer) *Tracker {
+	return &Tracker{
+		logBuf: logBuf,
+	}
 }
 
 // AddTask registers a Task and subsequently returns a pointer to it
@@ -120,6 +122,17 @@ func (t *Tracker) AddTask(file string, linesTotal int) *Task {
 	}
 	t.tasks = append(t.tasks, task)
 	return task
+}
+
+func (t *Tracker) SnapshotLogs(n int) []string {
+	snapshot := t.logBuf.Last(n)
+
+	var res []string
+	for _, snap := range snapshot {
+		res = append(res, snap.String())
+	}
+
+	return res
 }
 
 func (t *Tracker) SnapshotTasks() []TaskView {

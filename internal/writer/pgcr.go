@@ -59,6 +59,7 @@ func (w *PgcrWriter) Write(ctx context.Context, job telemetry.Job[bungie.PostGam
 		return err
 	}
 
+	slog.Info("Some info!")
 	return nil
 }
 

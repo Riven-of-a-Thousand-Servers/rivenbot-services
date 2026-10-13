@@ -3,7 +3,6 @@ package ui
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"math"
 	"strconv"
 	"strings"
@@ -38,17 +37,18 @@ type (
 	RenderTick    time.Time
 )
 
-type snapshotTickMsg time.Time
+type mainPaneTickMsg time.Time
 
-func snapshotTick() tea.Cmd {
-	return tea.Tick(250*time.Millisecond, func(t time.Time) tea.Msg {
-		return snapshotTickMsg(t)
+func mainPaneTick() tea.Cmd {
+	return tea.Tick(renderPeriod, func(t time.Time) tea.Msg {
+		return mainPaneTickMsg(t)
 	})
 }
 
 type Model struct {
 	tracker *telemetry.Tracker
 	snap    []telemetry.TaskView
+	logs    []string
 	state   uiState
 
 	spinner       spinner.Model
@@ -61,10 +61,8 @@ type Model struct {
 }
 
 func NewModel(tracker *telemetry.Tracker, cancelFunc context.CancelFunc) Model {
-	spinnerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 	spinner := spinner.New(
-		spinner.WithSpinner(spinner.Dot),
-		spinner.WithStyle(spinnerStyle))
+		spinner.WithSpinner(spinner.Dot))
 
 	return Model{
 		tracker:    tracker,
@@ -87,17 +85,18 @@ func WaitForEvent[T any](ch <-chan T) tea.Cmd {
 
 // Start listening for broker events
 func (m Model) Init() tea.Cmd {
-	return snapshotTick()
+	return tea.Batch(mainPaneTick(), m.spinner.Tick)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
-	case snapshotTickMsg:
+	case mainPaneTickMsg:
 		if m.state == datasetProcessing {
 			m.snap = m.tracker.SnapshotTasks()
+			m.logs = m.tracker.SnapshotLogs(18)
 		}
-		cmds = append(cmds, snapshotTick())
+		cmds = append(cmds, mainPaneTick())
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "esc":
@@ -137,41 +136,63 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() tea.View {
+	filesPane := lipgloss.NewStyle().
+		Width(118).
+		Height(20).
+		Border(lipgloss.RoundedBorder(), true).
+		BorderForeground(lipgloss.BrightCyan).
+		Padding(0)
+
+	logsPane := lipgloss.NewStyle().
+		Width(100).
+		Height(20).
+		Border(lipgloss.RoundedBorder(), true).
+		BorderForeground(lipgloss.BrightCyan).
+		AlignHorizontal(lipgloss.Left).
+		AlignVertical(lipgloss.Left).
+		Padding(0)
+
 	switch m.state {
 	case cacheWarming:
 		s := "\nCache Warming Sequence\n"
 		s += fmt.Sprintf("\n%s %s", m.spinner.View(), m.cacheStageMsg)
 		return tea.NewView(s)
 	case datasetProcessing:
+		var v tea.View
 		var rows []table.Row
 		for _, task := range m.snap {
 			row := createRow(task)
-			slog.Debug("Rows", "cell", row)
 			rows = append(rows, row)
 		}
 		m.table.SetRows(rows)
-		return tea.NewView(m.table.View())
+		logs := strings.Join(m.logs, "\n")
+
+		res := lipgloss.JoinHorizontal(228, filesPane.Render(m.table.View()), logsPane.Render(logs))
+		v.Content = res
+		v.AltScreen = true
+		return v
 	default:
 	}
 	return tea.NewView("Unknown state for the dataset process. Exiting.")
 }
 
 func createRow(task telemetry.TaskView) table.Row {
-	percentDone := float64(task.LinesRead) / float64(task.LinesTotal)
+	percentDone := fmt.Sprintf("%.2f%%", (float64(task.LinesRead)/float64(task.LinesTotal))*100)
 	linesRead := formatNumber(float64(task.LinesRead))
 	bytesRead := humanize.Bytes(uint64(task.BytesRead))
-	// inserted := formatNumber(float64(task.Inserted))
-	// skipped := formatNumber(float64(task.Skipped))
-	// errored := formatNumber(float64(task.Errored))
+	inserted := formatNumber(float64(task.Inserted))
+	skipped := formatNumber(float64(task.Skipped))
+	errored := formatNumber(float64(task.Errored))
+
 	var params []string
 	params = append(params, task.Filename)
 	params = append(params, task.State.String())
-	params = append(params, fmt.Sprintf("%.2f%%", percentDone*100))
+	params = append(params, percentDone)
 	params = append(params, linesRead)
 	params = append(params, bytesRead)
-	params = append(params, strconv.FormatInt(int64(task.Inserted), 10))
-	params = append(params, strconv.FormatInt(int64(task.Skipped), 10))
-	params = append(params, strconv.FormatInt(int64(task.Errored), 10))
+	params = append(params, inserted)
+	params = append(params, skipped)
+	params = append(params, errored)
 
 	return params
 }
@@ -192,20 +213,19 @@ func newTable() table.Model {
 		{Title: "File", Width: 30},
 		{Title: "State", Width: 10},
 		{Title: "Progress", Width: 10},
-		{Title: "Lines Read", Width: 12},
-		{Title: "Bytes Read", Width: 20},
-		{Title: "Inserted", Width: 12},
-		{Title: "Skipped", Width: 12},
-		{Title: "Errored", Width: 12},
+		{Title: "Lines Read", Width: 10},
+		{Title: "Bytes Read", Width: 10},
+		{Title: "Inserted", Width: 10},
+		{Title: "Skipped", Width: 10},
+		{Title: "Errored", Width: 10},
 	}
 
-	tbl := table.New(table.WithColumns(columns), table.WithFocused(false), table.WithWidth(200), table.WithHeight(12))
+	tbl := table.New(table.WithColumns(columns), table.WithFocused(false))
 	s := table.DefaultStyles()
 	s.Header.
 		BorderStyle(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("240")).
-		BorderBottom(true).
-		Bold(false)
+		Bold(true)
 	tbl.SetStyles(s)
 	return tbl
 }

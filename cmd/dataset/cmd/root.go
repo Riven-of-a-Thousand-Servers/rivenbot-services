@@ -16,6 +16,7 @@ import (
 	"pgcr-processing-service/internal/cache"
 	"pgcr-processing-service/internal/consumer"
 	"pgcr-processing-service/internal/db"
+	"pgcr-processing-service/internal/logging"
 	"pgcr-processing-service/internal/mapper"
 	"pgcr-processing-service/internal/pubsub"
 	"pgcr-processing-service/internal/telemetry"
@@ -39,6 +40,8 @@ const (
 	EventThroughput       = 20_000
 	CacheEventsBrokerSize = 10
 )
+
+const logFileName = "dataset.log"
 
 type datasetOpts struct {
 	RootDir     string
@@ -75,20 +78,25 @@ dataset`,
 			defer cancel()
 
 			// open a custom json-log file
-			logFile, err := os.OpenFile("dataset-import.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+			logFile, err := os.OpenFile(logFileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 			if err != nil {
 				return err
 			}
-
 			cleanup = append(cleanup, logFile.Close)
 
-			slog.SetDefault(slog.New(slog.NewJSONHandler(logFile, &slog.HandlerOptions{
+			handlerOptions := &slog.HandlerOptions{
 				Level: slog.LevelInfo.Level(),
-			})))
+			}
+
+			textHandler := slog.NewTextHandler(logFile, handlerOptions)
+			ringBuffer := telemetry.NewRingBuffer(30)
+			tuiHandler := logging.NewTuiHandler(ringBuffer, slog.LevelInfo.Level())
+
+			slog.SetDefault(slog.New(slog.NewMultiHandler(textHandler, tuiHandler)))
 
 			g, groupCtx := errgroup.WithContext(ctx)
 
-			tracker := telemetry.DefaultTracker()
+			tracker := telemetry.DefaultTracker(ringBuffer)
 
 			// Discover all .zst files before anything
 			// This cannot fail, otherwise everything goes to shit
