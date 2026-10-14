@@ -155,8 +155,9 @@ func (m Model) View() tea.View {
 		m.table.SetRows(rows)
 		logs := strings.Join(m.logs, "\n")
 
-		res := lipgloss.JoinHorizontal(228, filesPane.Render(m.table.View()), logsPane.Render(logs))
-		v.Content = res
+		out := lipgloss.JoinHorizontal(228, filesPane.Render(m.table.View()), logsPane.Render(logs))
+		out = lipgloss.JoinVertical(lipgloss.Center, out, m.footerView())
+		v.Content = out
 		v.AltScreen = true
 		return v
 	default:
@@ -208,7 +209,7 @@ func newTable() table.Model {
 		{Title: RedStyle.Render("Errored"), Width: 10},
 	}
 
-	tbl := table.New(table.WithColumns(columns))
+	tbl := table.New(table.WithColumns(columns), table.WithHeight(12), table.WithWidth(200))
 	s := table.DefaultStyles()
 	s.Header.
 		BorderStyle(lipgloss.InnerHalfBlockBorder()).

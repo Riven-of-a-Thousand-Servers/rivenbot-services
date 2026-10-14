@@ -55,11 +55,14 @@ func (w *PgcrWriter) Write(ctx context.Context, job telemetry.Job[bungie.PostGam
 		return err
 	}
 
+	if err = w.saveWeapons(ctx, job.ToDo); err != nil {
+		return err
+	}
+
 	if err = w.saveInstance(ctx, job.ToDo); err != nil {
 		return err
 	}
 
-	slog.Info("Some info!")
 	return nil
 }
 
@@ -85,6 +88,22 @@ func (w *PgcrWriter) saveBlob(ctx context.Context, pgcr bungie.PostGameCarnageRe
 	}
 
 	return w.queries.CreatePgcr(ctx, blob)
+}
+
+func (w *PgcrWriter) saveWeapons(ctx context.Context, pgcr pgcrs.PostGameCarnageReport) error {
+	weapons, err := w.mapper.MapToDBWeapons(ctx, pgcr)
+	if err != nil {
+		return err
+	}
+
+	for _, weapon := range weapons {
+		if err := w.queries.CreateWeapon(ctx, weapon); err != nil {
+			slog.Error("Unable to save weapon", "weaponId", weapon.WeaponHash, "error", err)
+			return err
+		}
+	}
+
+	return nil
 }
 
 // Saves a processed pgcr to the Postgres DB

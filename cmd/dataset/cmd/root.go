@@ -85,7 +85,7 @@ dataset`,
 			cleanup = append(cleanup, logFile.Close)
 
 			handlerOptions := &slog.HandlerOptions{
-				Level: slog.LevelInfo.Level(),
+				Level: slog.LevelDebug.Level(),
 			}
 
 			textHandler := slog.NewTextHandler(logFile, handlerOptions)

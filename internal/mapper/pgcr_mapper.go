@@ -90,6 +90,9 @@ func (m *DbMapper) MapToBlobObject(pgcr bungie.PostGameCarnageReport) (db.Create
 func (m *DbMapper) MapToDBWeapons(ctx context.Context, pgcr bungie.PostGameCarnageReport) ([]db.CreateWeaponParams, error) {
 	var weps []db.CreateWeaponParams
 	for _, entry := range pgcr.Entries {
+		if entry.Extended == nil {
+			continue
+		}
 		for _, weapon := range entry.Extended.Weapons {
 			params := db.CreateWeaponParams{
 				WeaponHash: weapon.ReferenceId,
@@ -185,28 +188,31 @@ func (m *DbMapper) MapToInstanceToons(pgcr bungie.PostGameCarnageReport) ([]db.C
 
 	instanceId := pgcr.ActivityDetails.InstanceId.Int64()
 	for memId, toons := range grouped {
-		dbToon := db.CreateInstanceCharacterParams{
-			InstanceID:   instanceId,
-			MembershipID: memId,
-		}
-
 		for _, toon := range toons {
-			dbToon.CharacterID = toon.CharacterId.Int64()
-			dbToon.Completed = toon.Values.Completed == 1.0
-			dbToon.ClassHash = toon.Player.ClassHash
-			dbToon.EmblemHash = toon.Player.EmblemHash
-			dbToon.Kills = int32(toon.Values.Kills)
-			dbToon.Deaths = int32(toon.Values.Kills)
-			dbToon.Assists = int32(toon.Values.Assists)
-			dbToon.Kda = toon.Values.Kda.String()
-			dbToon.Kdr = toon.Values.Kdr.String()
-			dbToon.Efficiency = int32(toon.Values.Efficiency)
-			dbToon.SuperKills = int32(toon.Extended.Abilities.SuperKills)
-			dbToon.GrenadeKills = int32(toon.Extended.Abilities.GrenadeKills)
-			dbToon.MeleeKills = int32(toon.Extended.Abilities.MeleeKills)
+			var superKills, grenadeKills, meleeKills int32
+			if toon.Extended != nil {
+				superKills = int32(toon.Extended.Abilities.SuperKills)
+				grenadeKills = int32(toon.Extended.Abilities.GrenadeKills)
+				meleeKills = int32(toon.Extended.Abilities.MeleeKills)
+			}
+			params = append(params, db.CreateInstanceCharacterParams{
+				InstanceID:   instanceId,
+				MembershipID: memId,
+				CharacterID:  toon.CharacterId.Int64(),
+				Completed:    toon.Values.Completed == 1.0,
+				ClassHash:    toon.Player.ClassHash,
+				EmblemHash:   toon.Player.EmblemHash,
+				Kills:        int32(toon.Values.Kills),
+				Deaths:       int32(toon.Values.Deaths),
+				Assists:      int32(toon.Values.Assists),
+				Kda:          toon.Values.Kda.String(),
+				Kdr:          toon.Values.Kdr.String(),
+				Efficiency:   int32(toon.Values.Efficiency),
+				SuperKills:   superKills,
+				GrenadeKills: grenadeKills,
+				MeleeKills:   meleeKills,
+			})
 		}
-
-		params = append(params, dbToon)
 	}
 	return params, nil
 }
@@ -221,6 +227,9 @@ func (m *DbMapper) MapToInstanceToonWeapons(pgcr bungie.PostGameCarnageReport) (
 	instanceId := pgcr.ActivityDetails.InstanceId
 	for memId, toons := range grouped {
 		for _, toon := range toons {
+			if toon.Extended == nil {
+				continue
+			}
 			charWeapons := toon.Extended.Weapons
 			for _, weapon := range charWeapons {
 				wep := db.CreateInstanceCharacterWeaponParams{

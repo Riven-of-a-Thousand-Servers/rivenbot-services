@@ -2,7 +2,6 @@ package telemetry
 
 import (
 	"fmt"
-	"slices"
 	"sync"
 	"time"
 )
@@ -44,15 +43,22 @@ func (b *RingBuffer) Push(e LogEntry) {
 
 func (b *RingBuffer) Last(n int) []LogEntry {
 	b.mu.RLock()
-	entries := slices.Clone(b.buf)
-	b.mu.RUnlock()
+	defer b.mu.RUnlock()
 
-	count := min(n, b.total, b.size)
+	// Count should resolve to the lowest of either the
+	// the request amount n, the total amount of items, the
+	// size of the array in case its full, or zero in worst case
+	// This essentially clamps the value so that is always within the
+	// valid range
+	count := max(0, min(n, b.total, b.size))
+	if count == 0 {
+		return []LogEntry{}
+	}
+
 	start := b.total - count
-
-	var res []LogEntry
+	res := make([]LogEntry, 0, count)
 	for i := start; i < b.total; i++ {
-		res = append(res, entries[i%b.total])
+		res = append(res, b.buf[i%b.size])
 	}
 
 	return res
