@@ -21,7 +21,7 @@ import (
 
 const (
 	rowsPerFile  = 10_000_000
-	renderPeriod = 250 * time.Millisecond
+	renderPeriod = 270 * time.Millisecond
 )
 
 type uiState int
