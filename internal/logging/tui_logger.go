@@ -20,7 +20,7 @@ func NewTuiHandler(buf *telemetry.RingBuffer, level slog.Level) *RingBufferHandl
 }
 
 func (h *RingBufferHandler) Enabled(ctx context.Context, level slog.Level) bool {
-	return h.level > level
+	return level >= h.level
 }
 
 func (h *RingBufferHandler) Handle(ctx context.Context, record slog.Record) error {

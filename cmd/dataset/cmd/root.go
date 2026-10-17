@@ -74,8 +74,8 @@ dataset`,
 				}
 			}()
 
-			ctx, cancel := signal.NotifyContext(cmd.Context(), syscall.SIGTERM, syscall.SIGINT)
-			defer cancel()
+			globalCtx, globalCancel := signal.NotifyContext(cmd.Context(), syscall.SIGTERM, syscall.SIGINT)
+			defer globalCancel()
 
 			// open a custom json-log file
 			logFile, err := os.OpenFile(logFileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
@@ -85,18 +85,19 @@ dataset`,
 			cleanup = append(cleanup, logFile.Close)
 
 			handlerOptions := &slog.HandlerOptions{
-				Level: slog.LevelDebug.Level(),
+				Level: slog.LevelInfo.Level(),
 			}
 
 			textHandler := slog.NewTextHandler(logFile, handlerOptions)
 			ringBuffer := telemetry.NewRingBuffer(30)
 			tuiHandler := logging.NewTuiHandler(ringBuffer, slog.LevelInfo.Level())
+			tracker := telemetry.DefaultTracker(ringBuffer)
 
+			// TODO: Perhaps this is bad practice and instead I should use more granular loggers
+			// this will do. For now.
 			slog.SetDefault(slog.New(slog.NewMultiHandler(textHandler, tuiHandler)))
 
-			g, groupCtx := errgroup.WithContext(ctx)
-
-			tracker := telemetry.DefaultTracker(ringBuffer)
+			eg, groupCtx := errgroup.WithContext(globalCtx)
 
 			// Discover all .zst files before anything
 			// This cannot fail, otherwise everything goes to shit
@@ -112,8 +113,8 @@ dataset`,
 			}
 
 			// Setup Tea.Program before cache start prepopulating so we can capture events
-			program := tea.NewProgram(ui.NewModel(tracker, cancel), tea.WithContext(groupCtx))
-			g.Go(func() error {
+			program := tea.NewProgram(ui.NewModel(tracker, globalCancel), tea.WithContext(groupCtx))
+			eg.Go(func() error {
 				_, err := program.Run()
 				return err
 			})
@@ -132,7 +133,7 @@ dataset`,
 				})
 
 			cache := cache.NewInMemoryCache(CacheEventsBrokerSize)
-			setupEvents(ctx, &eventsWg, eventsCh, cache)
+			setupEvents(globalCtx, &eventsWg, eventsCh, cache)
 
 			// Prepopulate immediately before instantiating mapper
 			if err = cache.Init(groupCtx,
@@ -166,21 +167,23 @@ dataset`,
 				itemWriter = writer.NewPgcrWriter(conn, queries, mapper, FileBrokerSize)
 			}
 
-			ch, err := datasetConsumer.Consume(ctx)
+			ch, err := datasetConsumer.Consume(globalCtx)
 			if err != nil {
 				return err
 			}
 
+			registerGauges(tracker, opts, itemWriter)
+
 			for range opts.Goroutines {
-				g.Go(func() error {
+				eg.Go(func() error {
 					return chainmorph.From(pipeline.NewChannelReader(ch)).
 						MapFunc(pipeline.MapRawPgcr).
 						If(pipeline.FilterRaids).
-						WriteTo(ctx, itemWriter)
+						WriteTo(globalCtx, itemWriter)
 				})
 			}
 
-			err = g.Wait()
+			err = eg.Wait()
 			if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, tea.ErrProgramKilled) {
 				slog.Error("Error during execution of dataset", "error", err)
 				return err
@@ -201,6 +204,17 @@ dataset`,
 	flags.StringVarP(&opts.FilePattern, "pattern", "p", "", "File pattern to match when discovering files")
 
 	return cmd
+}
+
+func registerGauges(tracker *telemetry.Tracker, opts datasetOpts, itemWriter chainmorph.ItemWriter[telemetry.Job[bungie.PostGameCarnageReport]]) {
+	tracker.RegisterGauge("Mapping", "workers", func() (queueLength int, queueCap int) {
+		return int(pipeline.MapCount.Load()), opts.Goroutines
+	})
+
+	tracker.RegisterGauge("Writing", "workers", func() (queueLength int, queueCap int) {
+		pw, _ := itemWriter.(*writer.PgcrWriter)
+		return pw.Writing(), opts.Goroutines
+	})
 }
 
 func publishEventsToTea(ctx context.Context, program *tea.Program, out <-chan tea.Msg) {

@@ -15,11 +15,19 @@ const (
 )
 
 type (
-	queueEntry struct {
+	gaugeEntry struct {
 		id        int
 		name      string
 		unit      string
 		gaugeFunc GaugeFunc
+	}
+
+	GaugeView struct {
+		Id     int
+		Name   string
+		Unit   string
+		Length int
+		Cap    int
 	}
 
 	TaskState int32
@@ -55,13 +63,13 @@ type (
 		FinishedAt time.Time
 	}
 
-	GaugeFunc func(name, unit string) (len, cap int)
+	GaugeFunc func() (queueLength, queueCap int)
 
 	Tracker struct {
 		logBuf *RingBuffer
 		mu     sync.RWMutex
 		nextId int
-		queues []queueEntry
+		gauges []gaugeEntry
 		tasks  []*Task
 	}
 
@@ -102,6 +110,17 @@ func (t *Task) View() TaskView {
 		Errored:    t.Errored.Load(),
 		StartedAt:  t.StartedAt,
 		FinishedAt: t.FinishedAt,
+	}
+}
+
+func (q *gaugeEntry) View() GaugeView {
+	length, cap := q.gaugeFunc()
+	return GaugeView{
+		Id:     q.id,
+		Name:   q.name,
+		Unit:   q.unit,
+		Length: length,
+		Cap:    cap,
 	}
 }
 
@@ -149,18 +168,31 @@ func (t *Tracker) SnapshotTasks() []TaskView {
 	return ringBuffer
 }
 
-// RegisterQueue adds a new queue representing an active Go channel
-func (t *Tracker) RegisterQueue(name, unit string, fn GaugeFunc) (unregister func()) {
+func (t *Tracker) SnapshotGauges() []GaugeView {
+	t.mu.RLock()
+	entries := slices.Clone(t.gauges)
+	t.mu.RUnlock()
+
+	gauges := make([]GaugeView, 0, len(entries))
+	for _, gauge := range entries {
+		gauges = append(gauges, gauge.View())
+	}
+
+	return gauges
+}
+
+// RegisterGauge adds a new queue representing an active Go channel
+func (t *Tracker) RegisterGauge(name, unit string, fn GaugeFunc) (unregister func()) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	t.nextId++
 	id := t.nextId
-	t.queues = append(t.queues, queueEntry{id: id, name: name, unit: unit, gaugeFunc: fn})
+	t.gauges = append(t.gauges, gaugeEntry{id: id, name: name, unit: unit, gaugeFunc: fn})
 	return func() {
 		t.mu.Lock()
 		defer t.mu.Unlock()
-		t.queues = slices.DeleteFunc(t.queues, func(e queueEntry) bool {
+		t.gauges = slices.DeleteFunc(t.gauges, func(e gaugeEntry) bool {
 			return e.id == id
 		})
 	}

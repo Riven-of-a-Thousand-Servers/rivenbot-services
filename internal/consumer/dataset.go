@@ -20,6 +20,8 @@ import (
 const (
 	maxSize      = 1024 * 1024 * 20 // 20 MBs
 	linesPerFile = 10_000_000
+	queueName    = "File Consumer"
+	queueUnit    = "Lines per File"
 )
 
 type ConsumerOpts struct {
@@ -61,15 +63,19 @@ func NewFileConsumer(idx walker.FileIndex,
 
 func (c *FileConsumer) Consume(ctx context.Context) (<-chan telemetry.Job[Delivery[dataset.RawContent]], error) {
 	c.once.Do(func() {
-		c.ch = make(chan telemetry.Job[Delivery[dataset.RawContent]])
-		go c.Start(ctx)
+		c.ch = make(chan telemetry.Job[Delivery[dataset.RawContent]], 512)
+		unregister := c.tracker.RegisterGauge(queueName, queueUnit, func() (queueLength int, queueCap int) {
+			return len(c.ch), cap(c.ch)
+		})
+		go c.Start(ctx, unregister)
 	})
 
 	return c.ch, nil
 }
 
-func (c *FileConsumer) Start(ctx context.Context) error {
+func (c *FileConsumer) Start(ctx context.Context, unregisterFunc func()) error {
 	defer close(c.ch)
+	defer unregisterFunc()
 
 	fileCount := 0
 	for _, entry := range c.fileIndex {

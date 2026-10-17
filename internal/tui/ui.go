@@ -37,17 +37,33 @@ type (
 	RenderTick    time.Time
 )
 
-type mainPaneTickMsg time.Time
+type (
+	MainPaneTickMsg time.Time
+	GaugeTickMsg    time.Time
+)
 
-func mainPaneTick() tea.Cmd {
+var (
+	barOK   = lipgloss.NewStyle().Foreground(lipgloss.Color("#9ECE6A"))
+	barWarn = lipgloss.NewStyle().Foreground(lipgloss.Color("#E0AF68"))
+	barFull = lipgloss.NewStyle().Foreground(lipgloss.Color("#F7768E"))
+)
+
+func mainTick() tea.Cmd {
 	return tea.Tick(renderPeriod, func(t time.Time) tea.Msg {
-		return mainPaneTickMsg(t)
+		return MainPaneTickMsg(t)
+	})
+}
+
+func gaugeTick() tea.Cmd {
+	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+		return GaugeTickMsg(t)
 	})
 }
 
 type Model struct {
 	tracker *telemetry.Tracker
 	snap    []telemetry.TaskView
+	gauges  []telemetry.GaugeView
 	logs    []string
 	state   uiState
 
@@ -73,26 +89,25 @@ func NewModel(tracker *telemetry.Tracker, cancelFunc context.CancelFunc) Model {
 
 // Start listening for broker events
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(mainPaneTick(), m.spinner.Tick)
+	return tea.Batch(mainTick(), gaugeTick(), m.spinner.Tick)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
-	case mainPaneTickMsg:
+	case MainPaneTickMsg:
 		if m.state == datasetProcessing {
 			m.snap = m.tracker.SnapshotTasks()
 			m.logs = m.tracker.SnapshotLogs(18)
 		}
-		cmds = append(cmds, mainPaneTick())
+		cmds = append(cmds, mainTick())
+	case GaugeTickMsg:
+		if m.state == datasetProcessing {
+			m.gauges = m.tracker.SnapshotGauges()
+		}
+		cmds = append(cmds, gaugeTick())
 	case tea.KeyPressMsg:
 		switch msg.String() {
-		case "esc":
-			if m.table.Focused() {
-				m.table.Blur()
-			} else {
-				m.table.Focused()
-			}
 		case "q", "ctrl+c":
 			m.cancelFunc()
 			cmds = append(cmds, tea.Quit)
@@ -140,6 +155,15 @@ func (m Model) View() tea.View {
 		AlignVertical(lipgloss.Left).
 		Padding(0)
 
+	gaugePane := lipgloss.NewStyle().
+		Width(76).
+		Height(7).
+		Border(lipgloss.RoundedBorder(), true).
+		BorderForeground(lipgloss.Color("62")).
+		AlignHorizontal(lipgloss.Left).
+		AlignVertical(lipgloss.Center).
+		Padding(0)
+
 	switch m.state {
 	case cacheWarming:
 		s := "\nCache Warming Sequence\n"
@@ -155,7 +179,15 @@ func (m Model) View() tea.View {
 		m.table.SetRows(rows)
 		logs := strings.Join(m.logs, "\n")
 
+		var gaugeRows []string
+		for _, gauge := range m.gauges {
+			gaugeRows = append(gaugeRows, gaugeRow(gauge, 20, 10))
+		}
+
+		gauges := strings.Join(gaugeRows, "\n")
+
 		out := lipgloss.JoinHorizontal(228, filesPane.Render(m.table.View()), logsPane.Render(logs))
+		out = lipgloss.JoinVertical(lipgloss.Left, out, gaugePane.Render(gauges))
 		out = lipgloss.JoinVertical(lipgloss.Center, out, m.footerView())
 		v.Content = out
 		v.AltScreen = true
@@ -234,4 +266,39 @@ func formatNumber(in float64) string {
 
 func trimFloat(f float64) string {
 	return strings.TrimSuffix(strconv.FormatFloat(f, 'f', 1, 64), ".0")
+}
+
+func gaugeRow(g telemetry.GaugeView, nameW, barW int) string {
+	name := lipgloss.NewStyle().Width(nameW).Render(g.Name)
+	b := barStyle(g).Render(bar(g.Length, g.Cap, barW))
+	nums := fmt.Sprintf(" %d/%d %s", g.Length, g.Cap, g.Unit)
+	return name + " " + b + nums
+}
+
+func bar(cur, max, width int) string {
+	if max <= 0 || width <= 0 {
+		return strings.Repeat("░", max0(width))
+	}
+	filled := min(max0(cur*width/max), width)
+	return strings.Repeat("▓", filled) + strings.Repeat("░", width-filled)
+}
+
+func max0(n int) int {
+	return max(0, n)
+}
+
+func barStyle(g telemetry.GaugeView) lipgloss.Style {
+	if g.Cap <= 0 {
+		return barOK
+	}
+
+	ratio := float64(g.Length) / float64(g.Cap)
+	switch {
+	case ratio >= 1.0:
+		return barFull
+	case ratio >= 0.8:
+		return barWarn
+	default:
+		return barOK
+	}
 }
