@@ -4,6 +4,12 @@ import (
 	"context"
 )
 
+type Header string
+
+const (
+	OffsetHeader Header = "offset"
+)
+
 // Represents each delivery item from amqp.delivery
 // we wrap around Ack and Nack functionality so we don't lose these
 // when unwrapping the types
@@ -12,6 +18,12 @@ type Delivery[T ~[]byte] struct {
 	Headers map[string]any
 	Ack     func() error
 	Nack    func(requeue bool) error
+}
+
+func NewDelivery[T ~[]byte](payload T) Delivery[T] {
+	return Delivery[T]{
+		Payload: payload,
+	}
 }
 
 // Default delivery with no Headers, Empty ACK and NACK callback functions
@@ -26,6 +38,11 @@ func DefaultDelivery[T ~[]byte](payload T) Delivery[T] {
 			return nil
 		},
 	}
+}
+
+// Add appends a header to the map of metadata
+func (d Delivery[T]) Add(header Header, value any) {
+	d.Headers[string(header)] = value
 }
 
 // Consumer represents any construct that relies on an external source

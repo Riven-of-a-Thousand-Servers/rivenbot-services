@@ -240,3 +240,7 @@ func (t *Task) IncrementLinesRead() int32 {
 func (t *Task) IncrementSkipped() int32 {
 	return t.Skipped.Add(1)
 }
+
+func (t *Task) IncrementBytesRead(amt int64) int64 {
+	return t.BytesRead.Add(amt)
+}

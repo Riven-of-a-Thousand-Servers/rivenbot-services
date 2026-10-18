@@ -35,10 +35,16 @@ func NewPgcrWriter(db *sql.DB,
 	}
 }
 
+// Writing returns the number of active goroutines that are
+// writing to the database
 func (w *PgcrWriter) Writing() int {
 	return int(w.writing.Load())
 }
 
+// TODO: Make writes to the database fault-tolerant, aka, be able to
+// quarantine errored-out reocrds. Here as well as in the reader, e.g.,
+// when we're unable to unmarshal JSON from the dataset
+//
 // Write order goes as follows:
 // 1. Compressed Blob
 // 2. Destiny Player data

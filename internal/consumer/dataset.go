@@ -85,7 +85,7 @@ func (c *FileConsumer) Start(ctx context.Context, unregisterFunc func()) error {
 
 		task := c.tracker.AddTask(entry.Filename, linesPerFile)
 		task.SetStarted()
-		if err := c.setupFile(ctx, entry, task); err != nil {
+		if err := c.prepareFile(ctx, entry, task); err != nil {
 			if errors.Is(err, context.Canceled) {
 				slog.Info("Consumer stopped: context cancelled")
 				task.SetFinished()
@@ -102,7 +102,7 @@ func (c *FileConsumer) Start(ctx context.Context, unregisterFunc func()) error {
 	return nil
 }
 
-func (c *FileConsumer) setupFile(ctx context.Context, entry walker.FileEntry, task *telemetry.Task) error {
+func (c *FileConsumer) prepareFile(ctx context.Context, entry walker.FileEntry, task *telemetry.Task) error {
 	slog.Info("Starting to setup file for consumption", "file", entry.Filename)
 	file, err := os.Open(entry.Path)
 	if err != nil {
@@ -124,7 +124,7 @@ func (c *FileConsumer) setupFile(ctx context.Context, entry walker.FileEntry, ta
 	scanner := bufio.NewScanner(decoder)
 	scanner.Buffer(buf, maxSize)
 
-	if err := c.scanLines(ctx, scanner, task); err != nil {
+	if err := c.consumeLines(ctx, scanner, task); err != nil {
 		return err
 	}
 
@@ -135,7 +135,7 @@ func (c *FileConsumer) setupFile(ctx context.Context, entry walker.FileEntry, ta
 	return nil
 }
 
-func (c *FileConsumer) scanLines(ctx context.Context, scanner *bufio.Scanner, task *telemetry.Task) error {
+func (c *FileConsumer) consumeLines(ctx context.Context, scanner *bufio.Scanner, task *telemetry.Task) error {
 	lineCount := 0
 
 ScanLoop:
@@ -148,24 +148,30 @@ ScanLoop:
 				break ScanLoop
 			}
 
-			payload := dataset.RawContent(scanner.Bytes())
-			task.BytesRead.Add(payload.Len())
-
-			delivery := DefaultDelivery(payload)
-			Job := telemetry.Job[Delivery[dataset.RawContent]]{
-				Task: task,
-				ToDo: delivery,
-			}
-
-			task.IncrementLinesRead()
+			job := CreateJob(scanner, lineCount, task)
 
 			select {
-			case c.ch <- Job:
+			case c.ch <- job:
 			case <-ctx.Done():
 				return ctx.Err()
 			}
+
+			task.IncrementBytesRead(job.ToDo.Payload.Len())
+			task.IncrementLinesRead()
 		}
 		lineCount++
 	}
 	return nil
+}
+
+func CreateJob(scanner *bufio.Scanner, lineCount int, task *telemetry.Task) telemetry.Job[Delivery[dataset.RawContent]] {
+	payload := dataset.RawContent(scanner.Bytes())
+	delivery := NewDelivery(payload)
+	delivery.Add(OffsetHeader, lineCount)
+
+	Job := telemetry.Job[Delivery[dataset.RawContent]]{
+		Task: task,
+		ToDo: delivery,
+	}
+	return Job
 }
