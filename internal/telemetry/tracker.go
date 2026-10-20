@@ -77,7 +77,7 @@ type (
 	// and additionally where to report their progress to which
 	// ends up being a Task struct itself
 	Job[T any] struct {
-		ToDo T
+		Todo T
 		Task *Task
 	}
 )

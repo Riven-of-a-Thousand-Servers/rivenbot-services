@@ -41,10 +41,6 @@ func (w *PgcrWriter) Writing() int {
 	return int(w.writing.Load())
 }
 
-// TODO: Make writes to the database fault-tolerant, aka, be able to
-// quarantine errored-out reocrds. Here as well as in the reader, e.g.,
-// when we're unable to unmarshal JSON from the dataset
-//
 // Write order goes as follows:
 // 1. Compressed Blob
 // 2. Destiny Player data
@@ -58,25 +54,24 @@ func (w *PgcrWriter) Write(ctx context.Context, job telemetry.Job[bungie.PostGam
 		switch {
 		case err != nil:
 			job.Task.IncrementErrors()
-			return
 		default:
 			job.Task.IncrementInserted()
 		}
 	}()
 
-	if err = w.saveBlob(ctx, job.ToDo); err != nil {
+	if err = w.saveBlob(ctx, job.Todo); err != nil {
 		return err
 	}
 
-	if err = w.savePlayers(ctx, job.ToDo); err != nil {
+	if err = w.savePlayers(ctx, job.Todo); err != nil {
 		return err
 	}
 
-	if err = w.saveWeapons(ctx, job.ToDo); err != nil {
+	if err = w.saveWeapons(ctx, job.Todo); err != nil {
 		return err
 	}
 
-	if err = w.saveInstance(ctx, job.ToDo); err != nil {
+	if err = w.saveInstance(ctx, job.Todo); err != nil {
 		return err
 	}
 

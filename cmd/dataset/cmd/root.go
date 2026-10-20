@@ -164,7 +164,7 @@ dataset`,
 				}
 				cleanup = append(cleanup, queries.Close)
 
-				itemWriter = writer.NewPgcrWriter(conn, queries, mapper, FileBrokerSize)
+				itemWriter = writer.NewLedgerWriter(queries, writer.NewPgcrWriter(conn, queries, mapper, FileBrokerSize))
 			}
 
 			ch, err := datasetConsumer.Consume(globalCtx)

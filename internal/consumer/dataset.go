@@ -156,7 +156,7 @@ ScanLoop:
 				return ctx.Err()
 			}
 
-			task.IncrementBytesRead(job.ToDo.Payload.Len())
+			task.IncrementBytesRead(job.Todo.Payload.Len())
 			task.IncrementLinesRead()
 		}
 		lineCount++
@@ -171,7 +171,7 @@ func CreateJob(scanner *bufio.Scanner, lineCount int, task *telemetry.Task) tele
 
 	Job := telemetry.Job[Delivery[dataset.RawContent]]{
 		Task: task,
-		ToDo: delivery,
+		Todo: delivery,
 	}
 	return Job
 }
