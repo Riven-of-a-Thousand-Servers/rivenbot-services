@@ -54,7 +54,7 @@ func Classify(stage string, err error) error {
 		// 57P01 - Server is shutting down
 		case "40P01", "40001", "55P03", "57014", "53300", "57P01":
 			return &ProcessingError{Kind: ErrTransient, Stage: stage, Err: err}
-		// 23505 - Unique violation (be careful if used on resources other than Instance)
+		// 23505 - Unique violation (careful if used on resources other than Instance, Instance_Character, etc.)
 		case "23505":
 			return &ProcessingError{Kind: ErrAlreadyProcessed, Stage: stage, Err: err}
 		// 23503 - Foreign Key Violation

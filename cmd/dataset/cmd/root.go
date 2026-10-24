@@ -12,6 +12,7 @@ import (
 	"slices"
 	"sync"
 	"syscall"
+	"time"
 
 	"pgcr-processing-service/internal/cache"
 	"pgcr-processing-service/internal/consumer"
@@ -41,7 +42,10 @@ const (
 	CacheEventsBrokerSize = 10
 )
 
-const logFileName = "dataset.log"
+const (
+	logFileName        = "dataset.log"
+	deadLetterFileName = "quarantine.txt"
+)
 
 type datasetOpts struct {
 	RootDir     string
@@ -82,7 +86,14 @@ dataset`,
 			if err != nil {
 				return err
 			}
+
+			deadLetterFile, err := os.OpenFile(deadLetterFileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+			if err != nil {
+				return err
+			}
+
 			cleanup = append(cleanup, logFile.Close)
+			cleanup = append(cleanup, deadLetterFile.Close)
 
 			handlerOptions := &slog.HandlerOptions{
 				Level: slog.LevelInfo.Level(),
@@ -164,7 +175,16 @@ dataset`,
 				}
 				cleanup = append(cleanup, queries.Close)
 
-				itemWriter = writer.NewLedgerWriter(queries, writer.NewPgcrWriter(conn, queries, mapper, FileBrokerSize))
+				itemWriter = writer.NewPgcrWriter(conn, queries, mapper, FileBrokerSize)
+				itemWriter = writer.NewLedgerWriter(queries, itemWriter)
+				itemWriter = writer.NewRetryWriter(itemWriter, 3*time.Millisecond, 3)
+				itemWriter = writer.NewDeadLetterWriter(deadLetterFile, itemWriter,
+					func(item telemetry.Job[bungie.PostGameCarnageReport]) []byte {
+						// TODO: This function should map the type T to a byte array that will
+						// be saved in the DeadLetterFile, in this case, it will be a
+						// telemetry Job with a PGCR
+						return []byte{}
+					})
 			}
 
 			ch, err := datasetConsumer.Consume(globalCtx)

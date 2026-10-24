@@ -7,10 +7,18 @@ import (
 	"sync/atomic"
 
 	"pgcr-processing-service/internal/db"
+	"pgcr-processing-service/internal/errors"
 	"pgcr-processing-service/internal/mapper"
 	"pgcr-processing-service/internal/telemetry"
 	"pgcr-processing-service/internal/types/bungie"
 	pgcrs "pgcr-processing-service/internal/types/bungie"
+)
+
+var (
+	RawPgcrStage  = "Raw PGCR"
+	PlayersStage  = "Players"
+	WeaponsStage  = "Weapons"
+	InstanceStage = "Instance"
 )
 
 type PgcrWriter struct {
@@ -42,29 +50,26 @@ func (w *PgcrWriter) Writing() int {
 
 func (w *PgcrWriter) Write(ctx context.Context, job telemetry.Job[bungie.PostGameCarnageReport]) (err error) {
 	if err = w.saveBlob(ctx, job.Todo); err != nil {
-		return err
+		return errors.Classify(RawPgcrStage, err)
 	}
 
 	if err = w.savePlayers(ctx, job.Todo); err != nil {
-		return err
+		return errors.Classify(PlayersStage, err)
 	}
 
 	if err = w.saveWeapons(ctx, job.Todo); err != nil {
-		return err
+		return errors.Classify(WeaponsStage, err)
 	}
 
 	if err = w.saveInstance(ctx, job.Todo); err != nil {
-		return err
+		return errors.Classify(InstanceStage, err)
 	}
 
 	return nil
 }
 
 func (w *PgcrWriter) savePlayers(ctx context.Context, pgcr pgcrs.PostGameCarnageReport) error {
-	players, err := w.mapper.MapToDestinyPlayers(pgcr)
-	if err != nil {
-		return err
-	}
+	players := w.mapper.MapToDestinyPlayers(pgcr)
 
 	for _, player := range players {
 		if _, err := w.queries.CreateDestinyPlayer(ctx, player); err != nil {

@@ -26,6 +26,7 @@ func MapRawPgcr[T ~[]byte](ctx context.Context, item telemetry.Job[consumer.Deli
 		return job, err
 	}
 
+	// TODO: Need to figure out how to send the Delivery Headers down stream
 	job = telemetry.Job[bungie.PostGameCarnageReport]{
 		Todo: out,
 		Task: item.Task,

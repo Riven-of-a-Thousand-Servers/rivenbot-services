@@ -30,7 +30,7 @@ const (
 	pstTimezone string = "America/Los_Angeles"
 )
 
-func (m *DbMapper) MapToDestinyPlayers(pgcr bungie.PostGameCarnageReport) ([]db.CreateDestinyPlayerParams, error) {
+func (m *DbMapper) MapToDestinyPlayers(pgcr bungie.PostGameCarnageReport) []db.CreateDestinyPlayerParams {
 	players := getUniquePlayers(pgcr)
 	entities := make([]db.CreateDestinyPlayerParams, len(players))
 	for _, player := range players {
@@ -57,7 +57,7 @@ func (m *DbMapper) MapToDestinyPlayers(pgcr bungie.PostGameCarnageReport) ([]db.
 		entities = append(entities, entity)
 	}
 
-	return entities, nil
+	return entities
 }
 
 func getUniquePlayers(pgcr bungie.PostGameCarnageReport) map[string]bungie.DestinyUserEntry {
