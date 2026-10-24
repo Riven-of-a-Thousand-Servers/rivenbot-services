@@ -17,7 +17,6 @@ type PgcrWriter struct {
 	db      *sql.DB
 	queries *db.Queries
 	mapper  *mapper.DbMapper
-	tracker *telemetry.Tracker
 
 	writing atomic.Int32
 }
@@ -41,24 +40,7 @@ func (w *PgcrWriter) Writing() int {
 	return int(w.writing.Load())
 }
 
-// Write order goes as follows:
-// 1. Compressed Blob
-// 2. Destiny Player data
-// 3. Weapon Information
-// 4. Instance Information
 func (w *PgcrWriter) Write(ctx context.Context, job telemetry.Job[bungie.PostGameCarnageReport]) (err error) {
-	w.writing.Add(1)
-	defer w.writing.Add(-1)
-
-	defer func() {
-		switch {
-		case err != nil:
-			job.Task.IncrementErrors()
-		default:
-			job.Task.IncrementInserted()
-		}
-	}()
-
 	if err = w.saveBlob(ctx, job.Todo); err != nil {
 		return err
 	}
