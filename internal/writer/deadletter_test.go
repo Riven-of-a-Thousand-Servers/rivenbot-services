@@ -13,7 +13,6 @@ const (
 )
 
 type mockWriter[T any] struct {
-	shouldErr   bool
 	returnedErr error
 }
 

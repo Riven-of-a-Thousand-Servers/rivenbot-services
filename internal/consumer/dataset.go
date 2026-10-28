@@ -41,10 +41,11 @@ type FileConsumer struct {
 	fileIndex walker.FileIndex
 	tracker   *telemetry.Tracker
 
-	once     sync.Once
-	ch       chan telemetry.Job[Delivery[dataset.RawContent]]
-	numFiles int
-	numLines int
+	once       sync.Once
+	ch         chan telemetry.Job[Delivery[dataset.RawContent]]
+	unregister func()
+	numFiles   int
+	numLines   int
 }
 
 func NewFileConsumer(idx walker.FileIndex,
@@ -52,30 +53,28 @@ func NewFileConsumer(idx walker.FileIndex,
 	brokerSize int,
 	opts ConsumerOpts,
 ) *FileConsumer {
-	return &FileConsumer{
+	c := &FileConsumer{
 		fileIndex: idx,
 		tracker:   tracker,
 		Broker:    pubsub.NewBroker[File](brokerSize),
 		numFiles:  opts.NumFiles,
 		numLines:  opts.NumLines,
+		ch:        make(chan telemetry.Job[Delivery[dataset.RawContent]], 512),
 	}
-}
-
-func (c *FileConsumer) Consume(ctx context.Context) (<-chan telemetry.Job[Delivery[dataset.RawContent]], error) {
-	c.once.Do(func() {
-		c.ch = make(chan telemetry.Job[Delivery[dataset.RawContent]], 512)
-		unregister := c.tracker.RegisterGauge(queueName, queueUnit, func() (queueLength int, queueCap int) {
-			return len(c.ch), cap(c.ch)
-		})
-		go c.Start(ctx, unregister)
+	c.unregister = c.tracker.RegisterGauge(queueName, queueUnit, func() (queueLength int, queueCap int) {
+		return len(c.ch), cap(c.ch)
 	})
 
-	return c.ch, nil
+	return c
 }
 
-func (c *FileConsumer) Start(ctx context.Context, unregisterFunc func()) error {
+func (c *FileConsumer) Out() <-chan telemetry.Job[Delivery[dataset.RawContent]] {
+	return c.ch
+}
+
+func (c *FileConsumer) Start(ctx context.Context) error {
+	defer c.unregister()
 	defer close(c.ch)
-	defer unregisterFunc()
 
 	fileCount := 0
 	for _, entry := range c.fileIndex {

@@ -6,9 +6,11 @@ package cmd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"slices"
 	"sync"
 	"syscall"
@@ -44,7 +46,7 @@ const (
 
 const (
 	logFileName        = "dataset.log"
-	deadLetterFileName = "quarantine.txt"
+	deadLetterFileName = "quarantine.log"
 )
 
 type datasetOpts struct {
@@ -100,18 +102,24 @@ dataset`,
 			}
 
 			textHandler := slog.NewTextHandler(logFile, handlerOptions)
-			ringBuffer := telemetry.NewRingBuffer(30)
-			tuiHandler := logging.NewTuiHandler(ringBuffer, slog.LevelInfo.Level())
-			tracker := telemetry.DefaultTracker(ringBuffer)
+			ringBuf := telemetry.NewRingBuffer(30)
+			tuiHandler := logging.NewTuiHandler(ringBuf, slog.LevelInfo.Level())
 
-			// TODO: Perhaps this is bad practice and instead I should use more granular loggers
-			// this will do. For now.
 			slog.SetDefault(slog.New(slog.NewMultiHandler(textHandler, tuiHandler)))
+
+			// Main recovery statement in case anything panics in the main goroutine
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("Fatal panc:", slog.Any("panic", r), slog.String("stack", string(debug.Stack())))
+				}
+			}()
 
 			eg, groupCtx := errgroup.WithContext(globalCtx)
 
 			// Discover all .zst files before anything
 			// This cannot fail, otherwise everything goes to shit
+			tracker := telemetry.DefaultTracker(ringBuf)
+
 			fileWalker := walker.NewFileWalker(opts.RootDir,
 				walker.WithEventsEnabled,
 				walker.WithDirFilter(walker.ExcludeHidden),
@@ -125,7 +133,7 @@ dataset`,
 
 			// Setup Tea.Program before cache start prepopulating so we can capture events
 			program := tea.NewProgram(ui.NewModel(tracker, globalCancel), tea.WithContext(groupCtx))
-			eg.Go(func() error {
+			goSafe(eg, func() error {
 				_, err := program.Run()
 				return err
 			})
@@ -145,6 +153,12 @@ dataset`,
 
 			cache := cache.NewInMemoryCache(CacheEventsBrokerSize)
 			setupEvents(globalCtx, &eventsWg, eventsCh, cache)
+
+			cleanup = append(cleanup, func() error {
+				globalCancel()
+				eventsWg.Wait()
+				return nil
+			})
 
 			// Prepopulate immediately before instantiating mapper
 			if err = cache.Init(groupCtx,
@@ -187,16 +201,17 @@ dataset`,
 					})
 			}
 
-			ch, err := datasetConsumer.Consume(globalCtx)
-			if err != nil {
-				return err
-			}
+			goSafe(eg, func() error {
+				return datasetConsumer.Start(globalCtx)
+			})
+
+			consumerCh := datasetConsumer.Out()
 
 			registerGauges(tracker, opts, itemWriter)
 
 			for range opts.Goroutines {
-				eg.Go(func() error {
-					return chainmorph.From(pipeline.NewChannelReader(ch)).
+				goSafe(eg, func() error {
+					return chainmorph.From(pipeline.NewChannelReader(consumerCh)).
 						MapFunc(pipeline.MapRawPgcr).
 						If(pipeline.FilterRaids).
 						WriteTo(globalCtx, itemWriter)
@@ -227,7 +242,7 @@ dataset`,
 }
 
 func registerGauges(tracker *telemetry.Tracker, opts datasetOpts, itemWriter chainmorph.ItemWriter[telemetry.Job[bungie.PostGameCarnageReport]]) {
-	tracker.RegisterGauge("Mapping", "workers", func() (queueLength int, queueCap int) {
+	tracker.RegisterGauge("Mapping", "workers", func() (gaugeLen int, gaugeCap int) {
 		return int(pipeline.MapCount.Load()), opts.Goroutines
 	})
 
@@ -286,6 +301,22 @@ func setupEvents[T any](
 				return
 			}
 		}
+	})
+}
+
+// Wrapper function around the errgroup's Go() function
+// Adds a defer statement that recovers the Goroutine in case
+// of a panic, logs it using slog and then overrides the return
+// value with an error instead
+func goSafe(g *errgroup.Group, f func() error) {
+	g.Go(func() (err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("Panic in worker", slog.Any("panic", r), slog.String("Stack", string(debug.Stack())))
+				err = fmt.Errorf("worker panic: %v", err)
+			}
+		}()
+		return f()
 	})
 }
 
