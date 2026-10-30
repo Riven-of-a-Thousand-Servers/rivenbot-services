@@ -49,6 +49,9 @@ func (w *PgcrWriter) Writing() int {
 }
 
 func (w *PgcrWriter) Write(ctx context.Context, job telemetry.Job[bungie.PostGameCarnageReport]) (err error) {
+	w.writing.Add(1)
+	defer w.writing.Add(-1)
+
 	if err = w.saveBlob(ctx, job.Todo); err != nil {
 		return errors.Classify(RawPgcrStage, err)
 	}

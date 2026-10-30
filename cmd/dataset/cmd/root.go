@@ -242,7 +242,11 @@ func registerGauges(tracker *telemetry.Tracker, opts datasetOpts, itemWriter cha
 	})
 
 	tracker.RegisterGauge("Writing", "workers", func() (queueLength int, queueCap int) {
-		pw, _ := itemWriter.(*writer.PgcrWriter)
+		pw, ok := itemWriter.(*writer.PgcrWriter)
+		if !ok {
+			slog.Error("Unable to downcast writer to pgcr writer")
+			os.Exit(1)
+		}
 		return pw.Writing(), opts.Goroutines
 	})
 }
