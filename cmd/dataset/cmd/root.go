@@ -54,7 +54,7 @@ type datasetOpts struct {
 	DbUrl       string
 	ApiKey      string
 	FilePattern string
-	Goroutines  int
+	Goroutines  int // Dont use
 	Noop        bool
 	NumFiles    int
 	NumLines    int
@@ -173,33 +173,28 @@ dataset`,
 
 			mapper := mapper.New(cache)
 			var itemWriter chainmorph.ItemWriter[telemetry.Job[bungie.PostGameCarnageReport]]
-			switch {
-			case opts.Noop:
-				itemWriter = writer.NoOpProcessor[telemetry.Job[bungie.PostGameCarnageReport]]()
-			default:
-				conn, err := db.Connect(groupCtx, opts.DbUrl)
-				if err != nil {
-					return err
-				}
-				cleanup = append(cleanup, conn.Close)
-
-				queries, err := db.Prepare(groupCtx, conn)
-				if err != nil {
-					return err
-				}
-				cleanup = append(cleanup, queries.Close)
-
-				itemWriter = writer.NewPgcrWriter(conn, queries, mapper, FileBrokerSize)
-				itemWriter = writer.NewLedgerWriter(queries, itemWriter)
-				itemWriter = writer.NewRetryWriter(itemWriter, 3*time.Millisecond, 3)
-				itemWriter = writer.NewDeadLetterWriter(deadLetterFile, itemWriter,
-					func(item telemetry.Job[bungie.PostGameCarnageReport]) []byte {
-						// TODO: This function should map the type T to a byte array that will
-						// be saved in the DeadLetterFile, in this case, it will be a
-						// telemetry Job with a PGCR
-						return []byte{}
-					})
+			conn, err := db.Connect(groupCtx, opts.DbUrl)
+			if err != nil {
+				return err
 			}
+			cleanup = append(cleanup, conn.Close)
+
+			queries, err := db.Prepare(groupCtx, conn)
+			if err != nil {
+				return err
+			}
+			cleanup = append(cleanup, queries.Close)
+
+			itemWriter = writer.NewPgcrWriter(conn, queries, mapper, FileBrokerSize)
+			itemWriter = writer.NewLedgerWriter(queries, itemWriter)
+			itemWriter = writer.NewRetryWriter(itemWriter, 3*time.Millisecond, 3)
+			itemWriter = writer.NewDeadLetterWriter(deadLetterFile, itemWriter,
+				func(item telemetry.Job[bungie.PostGameCarnageReport]) []byte {
+					// TODO: This function should map the type T to a byte array that will
+					// be saved in the DeadLetterFile, in this case, it will be a
+					// telemetry Job with a PGCR
+					return []byte{}
+				})
 
 			goSafe(eg, func() error {
 				return datasetConsumer.Start(globalCtx)

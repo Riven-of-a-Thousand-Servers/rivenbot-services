@@ -23,6 +23,7 @@ type Delivery[T ~[]byte] struct {
 func NewDelivery[T ~[]byte](payload T) Delivery[T] {
 	return Delivery[T]{
 		Payload: payload,
+		Headers: make(map[string]any),
 	}
 }
 
