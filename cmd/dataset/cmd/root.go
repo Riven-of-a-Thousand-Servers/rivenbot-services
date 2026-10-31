@@ -186,6 +186,11 @@ dataset`,
 			cleanup = append(cleanup, queries.Close)
 
 			itemWriter = writer.NewPgcrWriter(conn, queries, mapper, FileBrokerSize)
+			tracker.RegisterGauge("Writing", "workers", func() (queueLength int, queueCap int) {
+				pw, _ := itemWriter.(*writer.PgcrWriter)
+				return pw.Writing(), opts.Goroutines
+			})
+
 			itemWriter = writer.NewLedgerWriter(queries, itemWriter)
 			itemWriter = writer.NewRetryWriter(itemWriter, 3*time.Millisecond, 3)
 			itemWriter = writer.NewDeadLetterWriter(deadLetterFile, itemWriter,
@@ -196,6 +201,9 @@ dataset`,
 					return []byte{}
 				})
 
+			tracker.RegisterGauge("Mapping", "workers", func() (gaugeLen int, gaugeCap int) {
+				return int(pipeline.MapCount.Load()), opts.Goroutines
+			})
 			goSafe(eg, func() error {
 				return datasetConsumer.Start(globalCtx)
 			})
@@ -237,18 +245,6 @@ dataset`,
 }
 
 func registerGauges(tracker *telemetry.Tracker, opts datasetOpts, itemWriter chainmorph.ItemWriter[telemetry.Job[bungie.PostGameCarnageReport]]) {
-	tracker.RegisterGauge("Mapping", "workers", func() (gaugeLen int, gaugeCap int) {
-		return int(pipeline.MapCount.Load()), opts.Goroutines
-	})
-
-	tracker.RegisterGauge("Writing", "workers", func() (queueLength int, queueCap int) {
-		pw, ok := itemWriter.(*writer.PgcrWriter)
-		if !ok {
-			slog.Error("Unable to downcast writer to pgcr writer")
-			os.Exit(1)
-		}
-		return pw.Writing(), opts.Goroutines
-	})
 }
 
 func publishEventsToTea(ctx context.Context, program *tea.Program, out <-chan tea.Msg) {
