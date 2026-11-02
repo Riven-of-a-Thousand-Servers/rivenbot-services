@@ -172,7 +172,6 @@ dataset`,
 			}
 
 			mapper := mapper.New(cache)
-			var itemWriter chainmorph.ItemWriter[telemetry.Job[bungie.PostGameCarnageReport]]
 			conn, err := db.Connect(groupCtx, opts.DbUrl)
 			if err != nil {
 				return err
@@ -185,20 +184,20 @@ dataset`,
 			}
 			cleanup = append(cleanup, queries.Close)
 
-			itemWriter = writer.NewPgcrWriter(conn, queries, mapper, FileBrokerSize)
+			pgcrWriter := writer.NewPgcrWriter(conn, queries, mapper, FileBrokerSize)
 			tracker.RegisterGauge("Writing", "workers", func() (queueLength int, queueCap int) {
-				pw, _ := itemWriter.(*writer.PgcrWriter)
-				return pw.Writing(), opts.Goroutines
+				return pgcrWriter.Writing(), opts.Goroutines
 			})
 
-			itemWriter = writer.NewLedgerWriter(queries, itemWriter)
+			var itemWriter chainmorph.ItemWriter[telemetry.Job[bungie.PostGameCarnageReport]]
+			itemWriter = writer.NewLedgerWriter(queries, pgcrWriter)
 			itemWriter = writer.NewRetryWriter(itemWriter, 3*time.Millisecond, 3)
 			itemWriter = writer.NewDeadLetterWriter(deadLetterFile, itemWriter,
 				func(item telemetry.Job[bungie.PostGameCarnageReport]) []byte {
 					// TODO: This function should map the type T to a byte array that will
 					// be saved in the DeadLetterFile, in this case, it will be a
 					// telemetry Job with a PGCR
-					return []byte{}
+					return []byte("Hello world")
 				})
 
 			tracker.RegisterGauge("Mapping", "workers", func() (gaugeLen int, gaugeCap int) {
@@ -209,8 +208,6 @@ dataset`,
 			})
 
 			consumerCh := datasetConsumer.Out()
-
-			registerGauges(tracker, opts, itemWriter)
 
 			for range opts.Goroutines {
 				goSafe(eg, func() error {
@@ -242,9 +239,6 @@ dataset`,
 	flags.StringVarP(&opts.FilePattern, "pattern", "p", "", "File pattern to match when discovering files")
 
 	return cmd
-}
-
-func registerGauges(tracker *telemetry.Tracker, opts datasetOpts, itemWriter chainmorph.ItemWriter[telemetry.Job[bungie.PostGameCarnageReport]]) {
 }
 
 func publishEventsToTea(ctx context.Context, program *tea.Program, out <-chan tea.Msg) {
