@@ -3,13 +3,14 @@ package writer
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"pgcr-processing-service/internal/errors"
 )
 
 const (
-	fileName = "testdata/quarantine.log"
+	fileName = "quarantine.log"
 )
 
 type mockWriter[T any] struct {
@@ -22,7 +23,8 @@ func (m *mockWriter[T]) Write(ctx context.Context, item T) error {
 
 func Test_DeadLetterWrite(t *testing.T) {
 	ctx := context.Background()
-	quarantineFile, err := os.Create(fileName)
+	path := filepath.Join(t.TempDir(), fileName)
+	quarantineFile, err := os.Create(path)
 	if err != nil {
 		t.Fatal("Error opening quarantine file")
 	}
@@ -42,7 +44,7 @@ func Test_DeadLetterWrite(t *testing.T) {
 
 	quarantineFile.Sync()
 
-	out, err := os.ReadFile(fileName)
+	out, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal("Error reading back from the quarantine file")
 	}
