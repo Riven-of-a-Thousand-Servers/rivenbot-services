@@ -164,7 +164,10 @@ ScanLoop:
 }
 
 func CreateJob(scanner *bufio.Scanner, lineCount int, task *telemetry.Task) telemetry.Job[Delivery[dataset.RawContent]] {
-	payload := dataset.RawContent(scanner.Bytes())
+	scanned := scanner.Bytes()
+	cleanBytes := make([]byte, len(scanned))
+	copy(cleanBytes, scanned)
+	payload := dataset.RawContent(cleanBytes)
 	delivery := NewDelivery(payload)
 	delivery.Add(OffsetHeader, lineCount)
 

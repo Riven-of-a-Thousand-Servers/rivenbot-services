@@ -25,7 +25,8 @@ type DeadLetterWriter[T any] struct {
 	sinkable SinkableFunc[T]
 }
 
-func NewDeadLetterWriter[T any](sink io.Writer,
+func NewDeadLetterWriter[T any](
+	sink io.Writer,
 	inner chainmorph.ItemWriter[T],
 	sinkFunc SinkableFunc[T],
 ) *DeadLetterWriter[T] {

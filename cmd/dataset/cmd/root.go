@@ -190,8 +190,7 @@ dataset`,
 			})
 
 			var itemWriter chainmorph.ItemWriter[telemetry.Job[bungie.PostGameCarnageReport]]
-			itemWriter = writer.NewLedgerWriter(queries, pgcrWriter)
-			itemWriter = writer.NewRetryWriter(itemWriter, 3*time.Millisecond, 3)
+			itemWriter = writer.NewRetryWriter(pgcrWriter, 3*time.Millisecond, 3)
 			itemWriter = writer.NewDeadLetterWriter(deadLetterFile, itemWriter,
 				func(item telemetry.Job[bungie.PostGameCarnageReport]) []byte {
 					// TODO: This function should map the type T to a byte array that will

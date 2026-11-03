@@ -22,7 +22,7 @@ type (
 )
 
 func (l LogEntry) String() string {
-	return fmt.Sprintf("%s [%s] - %s", l.Timestamp.String(), l.Level, l.Message)
+	return fmt.Sprintf("%s [%s] - %s", l.Timestamp.Format(time.RFC1123), l.Level, l.Message)
 }
 
 func NewRingBuffer(size int) *RingBuffer {

@@ -6,4 +6,4 @@ INSERT INTO pgcr (
 VALUES (
     $1,
     $2
-);
+) ON CONFLICT (instance_id) DO NOTHING;

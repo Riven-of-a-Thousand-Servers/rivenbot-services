@@ -16,6 +16,7 @@ import (
 	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/dustin/go-humanize"
 )
 
@@ -66,6 +67,9 @@ type Model struct {
 	gauges  []telemetry.GaugeView
 	logs    []string
 	state   uiState
+	layout  layout
+
+	width, height int
 
 	spinner       spinner.Model
 	cacheStageMsg string
@@ -95,10 +99,13 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		m.layout = computeLayout(m.width, m.height)
 	case MainPaneTickMsg:
 		if m.state == datasetProcessing {
 			m.snap = m.tracker.SnapshotTasks()
-			m.logs = m.tracker.SnapshotLogs(18)
+			m.logs = m.tracker.SnapshotLogs(m.layout.logsInnerH) // -2 is from the border at the top/bottom
 		}
 		cmds = append(cmds, mainTick())
 	case GaugeTickMsg:
@@ -140,29 +147,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) View() tea.View {
 	filesPane := lipgloss.NewStyle().
-		Width(118).
-		Height(20).
+		Width(m.layout.filesW).
+		Height(m.layout.topH).
 		Border(lipgloss.RoundedBorder(), true).
-		BorderForeground(lipgloss.Color("62")).
-		Padding(0)
+		BorderForeground(lipgloss.Color("62"))
 
 	logsPane := lipgloss.NewStyle().
-		Width(100).
-		Height(20).
+		Width(m.layout.logsW).
+		Height(m.layout.topH).
 		Border(lipgloss.RoundedBorder(), true).
 		BorderForeground(lipgloss.Color("62")).
 		AlignHorizontal(lipgloss.Left).
-		AlignVertical(lipgloss.Left).
-		Padding(0)
+		AlignVertical(lipgloss.Left)
 
 	gaugePane := lipgloss.NewStyle().
-		Width(76).
-		Height(7).
+		Width(m.layout.gaugeW).
+		Height(m.layout.gaugeH).
 		Border(lipgloss.RoundedBorder(), true).
 		BorderForeground(lipgloss.Color("62")).
 		AlignHorizontal(lipgloss.Left).
-		AlignVertical(lipgloss.Center).
-		Padding(0)
+		AlignVertical(lipgloss.Center)
 
 	switch m.state {
 	case cacheWarming:
@@ -177,7 +181,12 @@ func (m Model) View() tea.View {
 			rows = append(rows, row)
 		}
 		m.table.SetRows(rows)
-		logs := strings.Join(m.logs, "\n")
+
+		lines := make([]string, len(m.logs))
+		for i, l := range m.logs {
+			lines[i] = ansi.Truncate(l, m.layout.logsInnerW, "...")
+		}
+		logs := strings.Join(lines, "\n")
 
 		var gaugeRows []string
 		for _, gauge := range m.gauges {
@@ -186,7 +195,7 @@ func (m Model) View() tea.View {
 
 		gauges := strings.Join(gaugeRows, "\n")
 
-		out := lipgloss.JoinHorizontal(228, filesPane.Render(m.table.View()), logsPane.Render(logs))
+		out := lipgloss.JoinHorizontal(lipgloss.Top, filesPane.Render(m.table.View()), logsPane.Render(logs))
 		out = lipgloss.JoinVertical(lipgloss.Left, out, gaugePane.Render(gauges))
 		out = lipgloss.JoinVertical(lipgloss.Center, out, m.footerView())
 		v.Content = out
@@ -219,7 +228,7 @@ func createRow(task telemetry.TaskView) table.Row {
 }
 
 func (m Model) footerView() string {
-	return "\n[q/ctrl+c] quit"
+	return fmt.Sprintf("\n[q/ctrl+c] quit %dx%d", m.width, m.height)
 }
 
 func truncate(s string, n int) string {
@@ -243,6 +252,7 @@ func newTable() table.Model {
 
 	tbl := table.New(table.WithColumns(columns), table.WithHeight(12), table.WithWidth(200))
 	s := table.DefaultStyles()
+	s.Selected = lipgloss.NewStyle()
 	s.Header.
 		BorderStyle(lipgloss.InnerHalfBlockBorder()).
 		BorderForeground(lipgloss.Color("240")).

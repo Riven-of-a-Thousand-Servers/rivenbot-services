@@ -127,17 +127,6 @@ CREATE INDEX IF NOT EXISTS instance_character_weapon_weapon_idx ON instance_char
     weapon_id
 );
 
-CREATE TABLE IF NOT EXISTS ingestion_log (
-    instance_id bigint PRIMARY KEY,
-    source text NOT NULL,             -- e.g. 'dataset', 'crawler'
-    -- 'success' | 'error' | 'processing'
-    status text NOT NULL DEFAULT 'processing',
-    first_seen_at timestamptz NOT NULL DEFAULT now(),
-    last_attempt_at timestamptz NOT NULL DEFAULT now(),
-    attempt_count int NOT NULL DEFAULT 1,
-    error text
-);
-
 -- +goose StatementEnd
 -- +goose Down
 DROP TABLE IF EXISTS ingestion_log;

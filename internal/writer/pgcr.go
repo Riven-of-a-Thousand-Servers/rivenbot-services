@@ -142,14 +142,18 @@ func (w *PgcrWriter) saveInstance(ctx context.Context, pgcr bungie.PostGameCarna
 			slog.Error("Failed to create instance player in DB", "pgcr", instanceId, "memId", player.MembershipID, "error", err)
 			return err
 		}
-		if err := qtx.IncrementPlayerCounts(ctx, db.IncrementPlayerCountsParams{
-			MembershipID: player.MembershipID,
-			Column2:      instance.IsFresh,
-			Column3:      player.Completed.Bool,
-		}); err != nil {
-			slog.Error("Failed to increment player raid counts", "pgcr", instanceId, "memId", player.MembershipID, "error", err)
-			return err
-		}
+
+		// TODO: This should be done at the very end of the backfill
+		// Since this can be done using an aggregate querie
+		//
+		// if err := qtx.IncrementPlayerCounts(ctx, db.IncrementPlayerCountsParams{
+		// 	MembershipID: player.MembershipID,
+		// 	Column2:      instance.IsFresh,
+		// 	Column3:      player.Completed.Bool,
+		// }); err != nil {
+		// 	slog.Error("Failed to increment player raid counts", "pgcr", instanceId, "memId", player.MembershipID, "error", err)
+		// 	return err
+		// }
 	}
 
 	instanceToons, err := w.mapper.MapToInstanceToons(pgcr)
