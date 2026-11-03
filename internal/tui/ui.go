@@ -195,6 +195,7 @@ func (m Model) View() tea.View {
 
 		gauges := strings.Join(gaugeRows, "\n")
 
+		// TODO: The top-most header for the TUI should go in here
 		out := lipgloss.JoinHorizontal(lipgloss.Top, filesPane.Render(m.table.View()), logsPane.Render(logs))
 		out = lipgloss.JoinVertical(lipgloss.Left, out, gaugePane.Render(gauges))
 		out = lipgloss.JoinVertical(lipgloss.Center, out, m.footerView())
