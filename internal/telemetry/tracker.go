@@ -3,6 +3,7 @@ package telemetry
 import (
 	"slices"
 	"sync"
+	"time"
 )
 
 type TaskState int32
@@ -15,11 +16,25 @@ const (
 )
 
 type Tracker struct {
-	logBuf *RingBuffer
-	mu     sync.RWMutex
-	nextId int
-	gauges []Gauge
-	tasks  []*Task
+	logBuf     *RingBuffer
+	mu         sync.RWMutex
+	nextId     int
+	totalFiles int32
+
+	startedAt time.Time
+	gauges    []Gauge
+	tasks     []*Task
+}
+
+type Summary struct {
+	Elapsed        time.Duration
+	ReadThroughput float64
+	FilesTotal     int32
+	FilesDone      int32
+	LinesRead      int32
+	LinesInserted  int32
+	LinesSkipped   int32
+	LinesErrored   int32
 }
 
 // Job represents the task a Task Worker is tasked with doing
@@ -45,9 +60,11 @@ func (t TaskState) String() string {
 	}
 }
 
-func DefaultTracker(buf *RingBuffer) *Tracker {
+func DefaultTracker(buf *RingBuffer, totalFiles int) *Tracker {
 	return &Tracker{
-		logBuf: buf,
+		logBuf:     buf,
+		totalFiles: int32(totalFiles),
+		startedAt:  time.Now(),
 	}
 }
 
@@ -73,6 +90,47 @@ func (t *Tracker) SnapshotLogs(n int) []string {
 	}
 
 	return res
+}
+
+func (t *Tracker) SnapshotSummary() Summary {
+	t.mu.RLock()
+	tasks := slices.Clone(t.tasks)
+	t.mu.RUnlock()
+
+	elapsed := time.Since(t.startedAt)
+
+	var (
+		filesDone     int32
+		linesRead     int32
+		linesSkipped  int32
+		linesInserted int32
+		linesErrored  int32
+	)
+
+	for _, t := range tasks {
+		v := t.View()
+		if v.State == Finished {
+			filesDone++
+		}
+		linesRead += v.LinesRead
+		linesInserted += v.Inserted
+		linesSkipped += v.Skipped
+		linesErrored += v.Errored
+	}
+
+	secs := max(1, elapsed.Seconds())
+	readThroughput := float64(linesRead) / secs
+
+	return Summary{
+		Elapsed:        elapsed,
+		ReadThroughput: readThroughput,
+		FilesDone:      filesDone,
+		FilesTotal:     t.totalFiles,
+		LinesRead:      linesRead,
+		LinesInserted:  linesInserted,
+		LinesSkipped:   linesSkipped,
+		LinesErrored:   linesErrored,
+	}
 }
 
 func (t *Tracker) SnapshotTasks() []TaskView {

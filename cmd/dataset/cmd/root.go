@@ -118,7 +118,6 @@ dataset`,
 
 			// Discover all .zst files before anything
 			// This cannot fail, otherwise everything goes to shit
-			tracker := telemetry.DefaultTracker(ringBuf)
 
 			fileWalker := walker.NewFileWalker(opts.RootDir,
 				walker.WithEventsEnabled,
@@ -130,6 +129,8 @@ dataset`,
 			if err != nil {
 				return err
 			}
+
+			tracker := telemetry.DefaultTracker(ringBuf, len(files))
 
 			// Setup Tea.Program before cache start prepopulating so we can capture events
 			program := tea.NewProgram(ui.NewModel(tracker, globalCancel), tea.WithContext(groupCtx))
@@ -177,6 +178,12 @@ dataset`,
 				return err
 			}
 			cleanup = append(cleanup, conn.Close)
+
+			// So we reuse as many connections as possible
+			// the extra 4 is for resource contention headroom
+			conn.SetMaxIdleConns(opts.Goroutines + 4)
+			conn.SetMaxOpenConns(opts.Goroutines + 4)
+			conn.SetConnMaxLifetime(30 * time.Minute)
 
 			queries, err := db.Prepare(groupCtx, conn)
 			if err != nil {

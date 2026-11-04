@@ -59,7 +59,7 @@ func NewFileConsumer(idx walker.FileIndex,
 		Broker:    pubsub.NewBroker[File](brokerSize),
 		numFiles:  opts.NumFiles,
 		numLines:  opts.NumLines,
-		ch:        make(chan telemetry.Job[Delivery[dataset.RawContent]], 512),
+		ch:        make(chan telemetry.Job[Delivery[dataset.RawContent]], 2048), // why 2048? Idk tbh
 	}
 	c.unregister = c.tracker.RegisterGauge(queueName, queueUnit, func() (queueLength int, queueCap int) {
 		return len(c.ch), cap(c.ch)

@@ -1,10 +1,12 @@
 package mapper
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"log/slog"
 	"math"
+	"slices"
 	"strconv"
 	"time"
 
@@ -32,30 +34,26 @@ const (
 
 func (m *DbMapper) MapToDestinyPlayers(pgcr bungie.PostGameCarnageReport) []db.CreateDestinyPlayerParams {
 	players := getUniquePlayers(pgcr)
-	entities := make([]db.CreateDestinyPlayerParams, len(players))
+	entities := make([]db.CreateDestinyPlayerParams, 0, len(players))
 	for _, player := range players {
 		entity := db.CreateDestinyPlayerParams{
-			MembershipID:   player.MembershipId.Int64(),
-			MembershipType: int32(player.MembershipType),
-			IsPublic:       sql.NullBool{Bool: player.IsPublic, Valid: true},
-			IconPath:       sql.NullString{String: player.IconPath, Valid: player.IconPath != ""},
-			DisplayName:    sql.NullString{String: player.DisplayName, Valid: player.DisplayName != ""},
+			MembershipID:      player.MembershipId.Int64(),
+			MembershipType:    int32(player.MembershipType),
+			IsPublic:          sql.NullBool{Bool: player.IsPublic, Valid: true},
+			IconPath:          sql.NullString{String: player.IconPath, Valid: player.IconPath != ""},
+			DisplayName:       sql.NullString{String: player.DisplayName, Valid: player.DisplayName != ""},
+			GlobalDisplayName: sql.NullString{String: player.BungieGlobalDisplayName, Valid: player.BungieGlobalDisplayName != ""},
+			GlobalDisplayNameCode: sql.NullInt32{
+				Int32: int32(player.BungieGlobalDisplayNameCode), Valid: player.BungieGlobalDisplayNameCode != 0,
+			},
 		}
-		if player.BungieGlobalDisplayName != "" {
-			entity.DisplayName = sql.NullString{String: player.BungieGlobalDisplayName, Valid: player.BungieGlobalDisplayName != ""}
-		} else {
-			entity.DisplayName = sql.NullString{String: player.DisplayName, Valid: player.DisplayName != ""}
-		}
-
-		if player.BungieGlobalDisplayNameCode != 0 {
-			entity.GlobalDisplayNameCode = sql.NullInt32{
-				Int32: int32(player.BungieGlobalDisplayNameCode),
-				Valid: player.BungieGlobalDisplayNameCode != 0,
-			}
-		}
-
 		entities = append(entities, entity)
 	}
+
+	// Sort them so every worker locks in the same order when inserting to DB
+	slices.SortFunc(entities, func(a, b db.CreateDestinyPlayerParams) int {
+		return cmp.Compare(a.MembershipID, b.MembershipID)
+	})
 
 	return entities
 }

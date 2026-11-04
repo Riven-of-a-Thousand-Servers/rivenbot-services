@@ -34,19 +34,17 @@ const (
 )
 
 type (
-	HeaderTickMsg time.Time
-	RenderTick    time.Time
-)
-
-type (
+	HeaderTickMsg   time.Time
 	MainPaneTickMsg time.Time
-	GaugeTickMsg    time.Time
 )
 
 var (
-	barOK   = lipgloss.NewStyle().Foreground(lipgloss.Color("#9ECE6A"))
-	barWarn = lipgloss.NewStyle().Foreground(lipgloss.Color("#E0AF68"))
-	barFull = lipgloss.NewStyle().Foreground(lipgloss.Color("#F7768E"))
+	barOK      = lipgloss.NewStyle().Foreground(lipgloss.Color("#9ECE6A"))
+	barWarn    = lipgloss.NewStyle().Foreground(lipgloss.Color("#E0AF68"))
+	barFull    = lipgloss.NewStyle().Foreground(lipgloss.Color("#F7768E"))
+	labelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#565F89"))
+	valueStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#C0CAF5")).Bold(true)
+	separator  = labelStyle.Render("  |  ")
 )
 
 func mainTick() tea.Cmd {
@@ -55,15 +53,10 @@ func mainTick() tea.Cmd {
 	})
 }
 
-func gaugeTick() tea.Cmd {
-	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
-		return GaugeTickMsg(t)
-	})
-}
-
 type Model struct {
 	tracker *telemetry.Tracker
-	snap    []telemetry.TaskView
+	summary telemetry.Summary
+	tasks   []telemetry.TaskView
 	gauges  []telemetry.GaugeView
 	logs    []string
 	state   uiState
@@ -93,7 +86,7 @@ func NewModel(tracker *telemetry.Tracker, cancelFunc context.CancelFunc) Model {
 
 // Start listening for broker events
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(mainTick(), gaugeTick(), m.spinner.Tick)
+	return tea.Batch(mainTick(), m.spinner.Tick)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -104,15 +97,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.layout = computeLayout(m.width, m.height)
 	case MainPaneTickMsg:
 		if m.state == datasetProcessing {
-			m.snap = m.tracker.SnapshotTasks()
+			m.tasks = m.tracker.SnapshotTasks()
 			m.logs = m.tracker.SnapshotLogs(m.layout.logsInnerH) // -2 is from the border at the top/bottom
-		}
-		cmds = append(cmds, mainTick())
-	case GaugeTickMsg:
-		if m.state == datasetProcessing {
 			m.gauges = m.tracker.SnapshotGauges()
+			m.summary = m.tracker.SnapshotSummary()
 		}
-		cmds = append(cmds, gaugeTick())
+
+		cmds = append(cmds, mainTick())
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "q", "ctrl+c":
@@ -146,6 +137,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() tea.View {
+	headerSection := strings.Join([]string{
+		item("Files", fmt.Sprintf("%d/%d", m.summary.FilesDone, m.summary.FilesTotal)),
+		item("Elapsed", m.summary.Elapsed.Round(time.Second).String()),
+		item("Read Throughput", formatNumber(m.summary.ReadThroughput)+"ln/s"),
+		item("Inserted", formatNumber(float64(m.summary.LinesInserted))),
+		item("Skipped", formatNumber(float64(m.summary.LinesSkipped))),
+		item("Errored", formatNumber(float64(m.summary.LinesErrored))),
+	}, separator)
+
+	headerSection = lipgloss.NewStyle().
+		Height(1).
+		AlignHorizontal(lipgloss.Center).
+		Width(m.width).
+		MaxWidth(m.width).
+		Render(headerSection)
+
 	filesPane := lipgloss.NewStyle().
 		Width(m.layout.filesW).
 		Height(m.layout.topH).
@@ -176,7 +183,7 @@ func (m Model) View() tea.View {
 	case datasetProcessing:
 		var v tea.View
 		var rows []table.Row
-		for _, task := range m.snap {
+		for _, task := range m.tasks {
 			row := createRow(task)
 			rows = append(rows, row)
 		}
@@ -195,16 +202,23 @@ func (m Model) View() tea.View {
 
 		gauges := strings.Join(gaugeRows, "\n")
 
-		// TODO: The top-most header for the TUI should go in here
-		out := lipgloss.JoinHorizontal(lipgloss.Top, filesPane.Render(m.table.View()), logsPane.Render(logs))
-		out = lipgloss.JoinVertical(lipgloss.Left, out, gaugePane.Render(gauges))
-		out = lipgloss.JoinVertical(lipgloss.Center, out, m.footerView())
-		v.Content = out
+		var res string
+		res = lipgloss.JoinHorizontal(lipgloss.Top, filesPane.Render(m.table.View()), logsPane.Render(logs))
+		res = lipgloss.JoinVertical(lipgloss.Left, res, gaugePane.Render(gauges))
+		res = lipgloss.JoinVertical(lipgloss.Center, res, m.footerView())
+		res = lipgloss.JoinVertical(lipgloss.Center, headerSection, res)
+
+		v.Content = res
 		v.AltScreen = true
+
 		return v
 	default:
 	}
 	return tea.NewView("Unknown state for the dataset process. Exiting.")
+}
+
+func item(label, value string) string {
+	return labelStyle.Render(label+" ") + valueStyle.Render(value)
 }
 
 func createRow(task telemetry.TaskView) table.Row {

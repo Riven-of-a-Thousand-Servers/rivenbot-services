@@ -44,16 +44,6 @@ type DestinyPlayer struct {
 	CreatedAt             time.Time      `json:"created_at"`
 }
 
-type IngestionLog struct {
-	InstanceID    int64          `json:"instance_id"`
-	Source        string         `json:"source"`
-	Status        string         `json:"status"`
-	FirstSeenAt   time.Time      `json:"first_seen_at"`
-	LastAttemptAt time.Time      `json:"last_attempt_at"`
-	AttemptCount  int32          `json:"attempt_count"`
-	Error         sql.NullString `json:"error"`
-}
-
 type Instance struct {
 	ID              int64     `json:"id"`
 	ActivityHash    int64     `json:"activity_hash"`

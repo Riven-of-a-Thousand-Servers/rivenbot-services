@@ -9,7 +9,7 @@ import (
 )
 
 type Querier interface {
-	CreateDestinyPlayer(ctx context.Context, arg CreateDestinyPlayerParams) (DestinyPlayer, error)
+	CreateDestinyPlayer(ctx context.Context, arg CreateDestinyPlayerParams) error
 	CreateInstance(ctx context.Context, arg CreateInstanceParams) error
 	CreateInstanceCharacter(ctx context.Context, arg CreateInstanceCharacterParams) error
 	CreateInstanceCharacterWeapon(ctx context.Context, arg CreateInstanceCharacterWeaponParams) error

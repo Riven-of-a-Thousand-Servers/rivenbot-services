@@ -1,4 +1,4 @@
--- name: CreateDestinyPlayer :one
+-- name: CreateDestinyPlayer :exec
 INSERT INTO destiny_player (
     membership_id,
     membership_type,
@@ -21,20 +21,17 @@ INSERT INTO destiny_player (
     $7,
     $8,
     $9,
-    $10,
-    $11
+    now(),
+    now()
 ) ON CONFLICT (membership_id)
 DO UPDATE
     SET
-        membership_id = excluded.membership_id,
-        membership_type = excluded.membership_type,
         global_display_name = excluded.global_display_name,
         global_display_name_code = excluded.global_display_name_code,
-        icon_path = excluded.icon_path,
-        is_public = excluded.is_public,
-        last_seen = now(),
-        last_crawled = now()
-RETURNING *;
+        display_name = coalesce(excluded.display_name, destiny_player.display_name),
+        icon_path = coalesce(excluded.icon_path, destiny_player.icon_path)
+    WHERE
+    excluded.global_display_name IS NOT NULL AND destiny_player.global_display_name IS NULL;
 
 -- name: IncrementPlayerCounts :exec
 UPDATE destiny_player

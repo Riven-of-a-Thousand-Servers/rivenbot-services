@@ -8,10 +8,9 @@ package db
 import (
 	"context"
 	"database/sql"
-	"time"
 )
 
-const createDestinyPlayer = `-- name: CreateDestinyPlayer :one
+const createDestinyPlayer = `-- name: CreateDestinyPlayer :exec
 INSERT INTO destiny_player (
     membership_id,
     membership_type,
@@ -34,20 +33,17 @@ INSERT INTO destiny_player (
     $7,
     $8,
     $9,
-    $10,
-    $11
+    now(),
+    now()
 ) ON CONFLICT (membership_id)
 DO UPDATE
     SET
-        membership_id = excluded.membership_id,
-        membership_type = excluded.membership_type,
         global_display_name = excluded.global_display_name,
         global_display_name_code = excluded.global_display_name_code,
-        icon_path = excluded.icon_path,
-        is_public = excluded.is_public,
-        last_seen = now(),
-        last_crawled = now()
-RETURNING membership_id, membership_type, icon_path, display_name, global_display_name, global_display_name_code, total_clears, total_full_clears, is_public, last_crawled, last_seen, created_at
+        display_name = coalesce(excluded.display_name, destiny_player.display_name),
+        icon_path = coalesce(excluded.icon_path, destiny_player.icon_path)
+    WHERE
+    excluded.global_display_name IS NOT NULL AND destiny_player.global_display_name IS NULL
 `
 
 type CreateDestinyPlayerParams struct {
@@ -60,12 +56,10 @@ type CreateDestinyPlayerParams struct {
 	TotalClears           int32          `json:"total_clears"`
 	TotalFullClears       int32          `json:"total_full_clears"`
 	IsPublic              sql.NullBool   `json:"is_public"`
-	LastCrawled           time.Time      `json:"last_crawled"`
-	LastSeen              sql.NullTime   `json:"last_seen"`
 }
 
-func (q *Queries) CreateDestinyPlayer(ctx context.Context, arg CreateDestinyPlayerParams) (DestinyPlayer, error) {
-	row := q.queryRow(ctx, q.createDestinyPlayerStmt, createDestinyPlayer,
+func (q *Queries) CreateDestinyPlayer(ctx context.Context, arg CreateDestinyPlayerParams) error {
+	_, err := q.exec(ctx, q.createDestinyPlayerStmt, createDestinyPlayer,
 		arg.MembershipID,
 		arg.MembershipType,
 		arg.IconPath,
@@ -75,25 +69,8 @@ func (q *Queries) CreateDestinyPlayer(ctx context.Context, arg CreateDestinyPlay
 		arg.TotalClears,
 		arg.TotalFullClears,
 		arg.IsPublic,
-		arg.LastCrawled,
-		arg.LastSeen,
 	)
-	var i DestinyPlayer
-	err := row.Scan(
-		&i.MembershipID,
-		&i.MembershipType,
-		&i.IconPath,
-		&i.DisplayName,
-		&i.GlobalDisplayName,
-		&i.GlobalDisplayNameCode,
-		&i.TotalClears,
-		&i.TotalFullClears,
-		&i.IsPublic,
-		&i.LastCrawled,
-		&i.LastSeen,
-		&i.CreatedAt,
-	)
-	return i, err
+	return err
 }
 
 const incrementPlayerCounts = `-- name: IncrementPlayerCounts :exec

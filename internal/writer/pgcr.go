@@ -68,6 +68,7 @@ func (w *PgcrWriter) Write(ctx context.Context, job telemetry.Job[bungie.PostGam
 		return errors.Classify(InstanceStage, err)
 	}
 
+	job.Task.IncrementInserted()
 	return nil
 }
 
@@ -75,7 +76,7 @@ func (w *PgcrWriter) savePlayers(ctx context.Context, pgcr pgcrs.PostGameCarnage
 	players := w.mapper.MapToDestinyPlayers(pgcr)
 
 	for _, player := range players {
-		if _, err := w.queries.CreateDestinyPlayer(ctx, player); err != nil {
+		if err := w.queries.CreateDestinyPlayer(ctx, player); err != nil {
 			return err
 		}
 	}

@@ -13,10 +13,11 @@ func computeLayout(width, height int) layout {
 	const (
 		gaugeH   = 7
 		footerH  = 1
+		headerH  = 1
 		minFiles = 118
 	)
 
-	topH := max(0, height-gaugeH-footerH)
+	topH := max(0, height-gaugeH-footerH-headerH-2)
 	filesW := min(width, max(minFiles, width*3/5))
 	logsW := width - filesW
 	gaugeW := width
