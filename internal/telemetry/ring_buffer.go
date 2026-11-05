@@ -2,13 +2,16 @@ package telemetry
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
 
 type (
 	RingBuffer struct {
-		buf   []LogEntry
+		// Reading/Writing from the buf should always be protected by using mutex mu
+		buf []LogEntry
+
 		total int
 		size  int
 		mu    sync.RWMutex
@@ -18,11 +21,15 @@ type (
 		Timestamp time.Time
 		Level     string
 		Message   string
+
+		// Just a list of strings formatted as 'key=value', nothing crazy
+		Attributes []string
 	}
 )
 
 func (l LogEntry) String() string {
-	return fmt.Sprintf("%s [%s] - %s", l.Timestamp.Format(time.RFC1123), l.Level, l.Message)
+	attrs := strings.Join(l.Attributes, " ")
+	return fmt.Sprintf("%s [%s] - %s: %s", l.Timestamp.Format(time.RFC1123), l.Level, l.Message, attrs)
 }
 
 func NewRingBuffer(size int) *RingBuffer {

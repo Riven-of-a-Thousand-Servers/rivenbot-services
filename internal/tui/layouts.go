@@ -18,7 +18,7 @@ func computeLayout(width, height int) layout {
 	)
 
 	topH := max(0, height-gaugeH-footerH-headerH-2)
-	filesW := min(width, max(minFiles, width*3/5))
+	filesW := min(width, max(minFiles, width*1/2))
 	logsW := width - filesW
 	gaugeW := width
 	logsInnerH := max(0, topH-2)

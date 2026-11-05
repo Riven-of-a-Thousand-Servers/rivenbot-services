@@ -2,6 +2,7 @@ package logging
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	"pgcr-processing-service/internal/telemetry"
@@ -24,10 +25,16 @@ func (h *RingBufferHandler) Enabled(ctx context.Context, level slog.Level) bool 
 }
 
 func (h *RingBufferHandler) Handle(ctx context.Context, record slog.Record) error {
+	var attrs []string
+	record.Attrs(func(a slog.Attr) bool {
+		attrs = append(attrs, fmt.Sprintf("%s=%v", a.Key, a.Value))
+		return true
+	})
 	entry := telemetry.LogEntry{
-		Timestamp: record.Time,
-		Message:   record.Message,
-		Level:     record.Level.String(),
+		Timestamp:  record.Time,
+		Message:    record.Message,
+		Level:      record.Level.String(),
+		Attributes: attrs,
 	}
 	h.buf.Push(entry)
 	return nil
