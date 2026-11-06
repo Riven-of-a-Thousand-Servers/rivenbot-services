@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"runtime/metrics"
 	"slices"
 	"sync"
 	"time"
@@ -15,6 +16,22 @@ const (
 	Finished
 )
 
+const (
+	MemoryHeapUsed         = "/memory/classes/heap/objects:bytes"
+	GoroutinesRunning      = "/sched/goroutines/running:goroutines"
+	GoroutinesWaiting      = "/sched/goroutines/waiting:goroutines"
+	GoroutineSaturation    = "/sched/latencies:seconds"
+	GarbageCollectionCyces = "/gc/cycles/total:gc-cycles"
+)
+
+var samples []metrics.Sample = []metrics.Sample{
+	{Name: MemoryHeapUsed},
+	{Name: GoroutinesRunning},
+	{Name: GoroutinesWaiting},
+	{Name: GoroutineSaturation},
+	{Name: GarbageCollectionCyces},
+}
+
 type Tracker struct {
 	logBuf     *RingBuffer
 	mu         sync.RWMutex
@@ -27,6 +44,11 @@ type Tracker struct {
 }
 
 type Summary struct {
+	General GeneralStats
+	Runtime RuntimeStats
+}
+
+type GeneralStats struct {
 	Elapsed        time.Duration
 	ReadThroughput float64
 	FilesTotal     int32
@@ -36,6 +58,8 @@ type Summary struct {
 	LinesSkipped   int32
 	LinesErrored   int32
 }
+
+type RuntimeStats struct{}
 
 // Job represents the task a Task Worker is tasked with doing
 // and additionally where to report their progress to which
@@ -122,14 +146,16 @@ func (t *Tracker) SnapshotSummary() Summary {
 	readThroughput := float64(linesRead) / secs
 
 	return Summary{
-		Elapsed:        elapsed,
-		ReadThroughput: readThroughput,
-		FilesDone:      filesDone,
-		FilesTotal:     t.totalFiles,
-		LinesRead:      linesRead,
-		LinesInserted:  linesInserted,
-		LinesSkipped:   linesSkipped,
-		LinesErrored:   linesErrored,
+		General: GeneralStats{
+			Elapsed:        elapsed,
+			ReadThroughput: readThroughput,
+			FilesDone:      filesDone,
+			FilesTotal:     t.totalFiles,
+			LinesRead:      linesRead,
+			LinesInserted:  linesInserted,
+			LinesSkipped:   linesSkipped,
+			LinesErrored:   linesErrored,
+		},
 	}
 }
 

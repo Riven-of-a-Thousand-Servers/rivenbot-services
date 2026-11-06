@@ -55,19 +55,21 @@ func mainTick() tea.Cmd {
 
 type Model struct {
 	tracker *telemetry.Tracker
-	summary telemetry.Summary
+
 	tasks   []telemetry.TaskView
 	gauges  []telemetry.GaugeView
-	logs    []string
-	state   uiState
-	layout  layout
+	summary telemetry.Summary
+
+	logs   []string
+	state  uiState
+	layout layout
 
 	width, height int
-
-	spinner       spinner.Model
 	cacheStageMsg string
 
-	table      table.Model
+	spinner spinner.Model
+	table   table.Model
+
 	cancelFunc context.CancelFunc
 }
 
@@ -138,12 +140,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) View() tea.View {
 	headerSection := strings.Join([]string{
-		item("Files", fmt.Sprintf("%d/%d", m.summary.FilesDone, m.summary.FilesTotal)),
-		item("Elapsed", m.summary.Elapsed.Round(time.Second).String()),
-		item("Read Throughput", formatNumber(m.summary.ReadThroughput)+"ln/s"),
-		item("Inserted", formatNumber(float64(m.summary.LinesInserted))),
-		item("Skipped", formatNumber(float64(m.summary.LinesSkipped))),
-		item("Errored", formatNumber(float64(m.summary.LinesErrored))),
+		item("Files", fmt.Sprintf("%d/%d", m.summary.General.FilesDone, m.summary.General.FilesTotal)),
+		item("Elapsed", m.summary.General.Elapsed.Round(time.Second).String()),
+		item("Read Throughput", formatNumber(m.summary.General.ReadThroughput)+"ln/s"),
+		item("Inserted", formatNumber(float64(m.summary.General.LinesInserted))),
+		item("Skipped", formatNumber(float64(m.summary.General.LinesSkipped))),
+		item("Errored", formatNumber(float64(m.summary.General.LinesErrored))),
 	}, separator)
 
 	headerSection = lipgloss.NewStyle().
@@ -167,6 +169,13 @@ func (m Model) View() tea.View {
 		AlignHorizontal(lipgloss.Left).
 		AlignVertical(lipgloss.Left)
 
+	// runtimePane := lipgloss.NewStyle().
+	// 	Width(m.layout.runtimeW).
+	// 	Height(m.layout.runtimeH).
+	// 	Border(lipgloss.RoundedBorder(), true).
+	// 	AlignHorizontal(lipgloss.Left).
+	// 	AlignVertical(lipgloss.Left)
+	//
 	gaugePane := lipgloss.NewStyle().
 		Width(m.layout.gaugeW).
 		Height(m.layout.gaugeH).
@@ -204,6 +213,7 @@ func (m Model) View() tea.View {
 
 		var res string
 		res = lipgloss.JoinHorizontal(lipgloss.Top, filesPane.Render(m.table.View()), logsPane.Render(logs))
+		// res = lipgloss.JoinHorizontal(lipgloss.Top, runtimePane.Render(m.summary))
 		res = lipgloss.JoinVertical(lipgloss.Left, res, gaugePane.Render(gauges))
 		res = lipgloss.JoinVertical(lipgloss.Center, res, m.footerView())
 		res = lipgloss.JoinVertical(lipgloss.Center, headerSection, res)
