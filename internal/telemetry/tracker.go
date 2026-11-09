@@ -33,10 +33,11 @@ var samples []metrics.Sample = []metrics.Sample{
 }
 
 type Tracker struct {
-	logBuf     *RingBuffer
-	mu         sync.RWMutex
-	nextId     int
-	totalFiles int32
+	logBuf           *RingBuffer
+	mu               sync.RWMutex
+	nextId           int
+	totalFiles       int32
+	runtimeHistogram *Histogram
 
 	startedAt time.Time
 	gauges    []Gauge
@@ -59,7 +60,9 @@ type GeneralStats struct {
 	LinesErrored   int32
 }
 
-type RuntimeStats struct{}
+type RuntimeStats struct {
+	SchedLatencies []Bucket
+}
 
 // Job represents the task a Task Worker is tasked with doing
 // and additionally where to report their progress to which
@@ -84,7 +87,7 @@ func (t TaskState) String() string {
 	}
 }
 
-func DefaultTracker(buf *RingBuffer, totalFiles int) *Tracker {
+func DefaultTracker(buf *RingBuffer, hist *Histogram, totalFiles int) *Tracker {
 	return &Tracker{
 		logBuf:     buf,
 		totalFiles: int32(totalFiles),
@@ -146,6 +149,9 @@ func (t *Tracker) SnapshotSummary() Summary {
 	readThroughput := float64(linesRead) / secs
 
 	return Summary{
+		Runtime: RuntimeStats{
+			SchedLatencies: t.runtimeHistogram.SampleLatest(),
+		},
 		General: GeneralStats{
 			Elapsed:        elapsed,
 			ReadThroughput: readThroughput,

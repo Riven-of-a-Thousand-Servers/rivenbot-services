@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"runtime/metrics"
 	"slices"
 	"sync"
 	"syscall"
@@ -130,7 +131,18 @@ dataset`,
 				return err
 			}
 
-			tracker := telemetry.DefaultTracker(ringBuf, len(files))
+			hist := telemetry.NewHistogram(
+				[]metrics.Sample{{Name: "/sched/latencies:seconds"}},
+				200*time.Millisecond,
+				1*time.Microsecond,
+				10*time.Microsecond,
+				100*time.Microsecond,
+				1*time.Millisecond,
+				10*time.Millisecond,
+			)
+
+			cleanup = append(cleanup, hist.Close)
+			tracker := telemetry.DefaultTracker(ringBuf, hist, len(files))
 
 			// Setup Tea.Program before cache start prepopulating so we can capture events
 			program := tea.NewProgram(ui.NewModel(tracker, globalCancel), tea.WithContext(groupCtx))

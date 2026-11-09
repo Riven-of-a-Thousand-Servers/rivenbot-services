@@ -6,9 +6,18 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-var baseTableStyle = lipgloss.NewStyle().
-	BorderStyle(lipgloss.NormalBorder()).
-	BorderForeground(lipgloss.Color("240"))
+var (
+	tableStyle = lipgloss.NewStyle().BorderStyle(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("240"))
+
+	barOK   = lipgloss.NewStyle().Foreground(lipgloss.Color("#9ECE6A"))
+	barWarn = lipgloss.NewStyle().Foreground(lipgloss.Color("#E0AF68"))
+	barFull = lipgloss.NewStyle().Foreground(lipgloss.Color("#F7768E"))
+
+	labelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#565F89"))
+	valueStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#C0CAF5")).Bold(true)
+
+	headerSeparator = labelStyle.Render("  |  ")
+)
 
 const (
 	headerString = "PGCR dataset import — %s\nCompleted Files: %d/%d   Errors: %d   Elapsed: %s   Throughput: %.0f rows/s   In-Flight: %d"

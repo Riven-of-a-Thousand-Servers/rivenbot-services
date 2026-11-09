@@ -3,8 +3,6 @@ package ui
 import (
 	"context"
 	"fmt"
-	"math"
-	"strconv"
 	"strings"
 	"time"
 
@@ -33,19 +31,7 @@ const (
 	datasetProcessing
 )
 
-type (
-	HeaderTickMsg   time.Time
-	MainPaneTickMsg time.Time
-)
-
-var (
-	barOK      = lipgloss.NewStyle().Foreground(lipgloss.Color("#9ECE6A"))
-	barWarn    = lipgloss.NewStyle().Foreground(lipgloss.Color("#E0AF68"))
-	barFull    = lipgloss.NewStyle().Foreground(lipgloss.Color("#F7768E"))
-	labelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#565F89"))
-	valueStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#C0CAF5")).Bold(true)
-	separator  = labelStyle.Render("  |  ")
-)
+type MainPaneTickMsg time.Time
 
 func mainTick() tea.Cmd {
 	return tea.Tick(renderPeriod, func(t time.Time) tea.Msg {
@@ -78,8 +64,9 @@ func NewModel(tracker *telemetry.Tracker, cancelFunc context.CancelFunc) Model {
 		spinner.WithSpinner(spinner.Dot))
 
 	return Model{
-		tracker:    tracker,
-		spinner:    spinner,
+		tracker: tracker,
+		spinner: spinner,
+
 		state:      cacheWarming,
 		table:      newTable(),
 		cancelFunc: cancelFunc,
@@ -140,13 +127,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) View() tea.View {
 	headerSection := strings.Join([]string{
-		item("Files", fmt.Sprintf("%d/%d", m.summary.General.FilesDone, m.summary.General.FilesTotal)),
-		item("Elapsed", m.summary.General.Elapsed.Round(time.Second).String()),
-		item("Read Throughput", formatNumber(m.summary.General.ReadThroughput)+"ln/s"),
-		item("Inserted", formatNumber(float64(m.summary.General.LinesInserted))),
-		item("Skipped", formatNumber(float64(m.summary.General.LinesSkipped))),
-		item("Errored", formatNumber(float64(m.summary.General.LinesErrored))),
-	}, separator)
+		headerItem("Files", fmt.Sprintf("%d/%d", m.summary.General.FilesDone, m.summary.General.FilesTotal)),
+		headerItem("Elapsed", m.summary.General.Elapsed.Round(time.Second).String()),
+		headerItem("Read Throughput", formatNumber(m.summary.General.ReadThroughput)+"ln/s"),
+		headerItem("Inserted", formatNumber(float64(m.summary.General.LinesInserted))),
+		headerItem("Skipped", formatNumber(float64(m.summary.General.LinesSkipped))),
+		headerItem("Errored", formatNumber(float64(m.summary.General.LinesErrored))),
+	}, headerSeparator)
 
 	headerSection = lipgloss.NewStyle().
 		Height(1).
@@ -169,13 +156,6 @@ func (m Model) View() tea.View {
 		AlignHorizontal(lipgloss.Left).
 		AlignVertical(lipgloss.Left)
 
-	// runtimePane := lipgloss.NewStyle().
-	// 	Width(m.layout.runtimeW).
-	// 	Height(m.layout.runtimeH).
-	// 	Border(lipgloss.RoundedBorder(), true).
-	// 	AlignHorizontal(lipgloss.Left).
-	// 	AlignVertical(lipgloss.Left)
-	//
 	gaugePane := lipgloss.NewStyle().
 		Width(m.layout.gaugeW).
 		Height(m.layout.gaugeH).
@@ -186,7 +166,7 @@ func (m Model) View() tea.View {
 
 	switch m.state {
 	case cacheWarming:
-		s := "\nCache Warming Sequence\n"
+		s := "\nStarting...\n"
 		s += fmt.Sprintf("\n%s %s", m.spinner.View(), m.cacheStageMsg)
 		return tea.NewView(s)
 	case datasetProcessing:
@@ -208,14 +188,17 @@ func (m Model) View() tea.View {
 		for _, gauge := range m.gauges {
 			gaugeRows = append(gaugeRows, gaugeRow(gauge, 20, 10))
 		}
-
 		gauges := strings.Join(gaugeRows, "\n")
+
+		var histogramRows []string
+		maxCount := telemetry.MaxCount(m.summary.Runtime.SchedLatencies)
+		for _, bucket := range m.summary.Runtime.SchedLatencies {
+			histogramRows = append(histogramRows, histogramRow(bucket, 6, 10, int(maxCount)))
+		}
 
 		var res string
 		res = lipgloss.JoinHorizontal(lipgloss.Top, filesPane.Render(m.table.View()), logsPane.Render(logs))
-		// res = lipgloss.JoinHorizontal(lipgloss.Top, runtimePane.Render(m.summary))
 		res = lipgloss.JoinVertical(lipgloss.Left, res, gaugePane.Render(gauges))
-		res = lipgloss.JoinVertical(lipgloss.Center, res, m.footerView())
 		res = lipgloss.JoinVertical(lipgloss.Center, headerSection, res)
 
 		v.Content = res
@@ -225,10 +208,6 @@ func (m Model) View() tea.View {
 	default:
 	}
 	return tea.NewView("Unknown state for the dataset process. Exiting.")
-}
-
-func item(label, value string) string {
-	return labelStyle.Render(label+" ") + valueStyle.Render(value)
 }
 
 func createRow(task telemetry.TaskView) table.Row {
@@ -250,17 +229,6 @@ func createRow(task telemetry.TaskView) table.Row {
 	params = append(params, errored)
 
 	return params
-}
-
-func (m Model) footerView() string {
-	return fmt.Sprintf("\n[q/ctrl+c] quit %dx%d", m.width, m.height)
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n-3] + "..."
 }
 
 func newTable() table.Model {
@@ -286,21 +254,17 @@ func newTable() table.Model {
 	return tbl
 }
 
-func formatNumber(in float64) string {
-	abs := math.Abs(in)
-	switch {
-	case abs >= 1e9:
-		return trimFloat(in/1e9) + "B"
-	case abs >= 1e6:
-		return trimFloat(in/1e6) + "M"
-	case abs >= 1e3:
-		return trimFloat(in/1e3) + "K"
+func histogramRow(b telemetry.Bucket, nameW, barW, maxCount int) string {
+	var name string
+	nameStyle := lipgloss.NewStyle().Width(nameW)
+	if b.Last {
+		name = nameStyle.Render(">" + b.Upper.String())
+	} else {
+		name = nameStyle.Render("≤")
 	}
-	return trimFloat(in)
-}
 
-func trimFloat(f float64) string {
-	return strings.TrimSuffix(strconv.FormatFloat(f, 'f', 1, 64), ".0")
+	bar := bar(int(b.Count), maxCount, barW)
+	return name + " " + bar + " " + string(b.Count)
 }
 
 func gaugeRow(g telemetry.GaugeView, nameW, barW int) string {
@@ -316,10 +280,6 @@ func bar(cur, max, width int) string {
 	}
 	filled := min(max0(cur*width/max), width)
 	return strings.Repeat("▓", filled) + strings.Repeat("░", width-filled)
-}
-
-func max0(n int) int {
-	return max(0, n)
 }
 
 func barStyle(g telemetry.GaugeView) lipgloss.Style {
