@@ -10,10 +10,10 @@ import (
 
 type RingBufferHandler struct {
 	level slog.Level
-	buf   *telemetry.RingBuffer
+	buf   *telemetry.Ring[telemetry.LogEntry]
 }
 
-func NewTuiHandler(buf *telemetry.RingBuffer, level slog.Level) *RingBufferHandler {
+func NewTuiHandler(buf *telemetry.Ring[telemetry.LogEntry], level slog.Level) *RingBufferHandler {
 	return &RingBufferHandler{
 		level: level,
 		buf:   buf,

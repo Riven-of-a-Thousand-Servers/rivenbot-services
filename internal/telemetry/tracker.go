@@ -33,7 +33,7 @@ var samples []metrics.Sample = []metrics.Sample{
 }
 
 type Tracker struct {
-	logBuf           *RingBuffer
+	logBuf           *Ring[LogEntry]
 	mu               sync.RWMutex
 	nextId           int
 	totalFiles       int32
@@ -45,11 +45,11 @@ type Tracker struct {
 }
 
 type Summary struct {
-	General GeneralStats
-	Runtime RuntimeStats
+	AppStats AppStats
+	Runtime  RuntimeStats
 }
 
-type GeneralStats struct {
+type AppStats struct {
 	Elapsed        time.Duration
 	ReadThroughput float64
 	FilesTotal     int32
@@ -87,11 +87,12 @@ func (t TaskState) String() string {
 	}
 }
 
-func DefaultTracker(buf *RingBuffer, hist *Histogram, totalFiles int) *Tracker {
+func DefaultTracker(buf *Ring[LogEntry], hist *Histogram, totalFiles int) *Tracker {
 	return &Tracker{
-		logBuf:     buf,
-		totalFiles: int32(totalFiles),
-		startedAt:  time.Now(),
+		logBuf:           buf,
+		runtimeHistogram: hist,
+		totalFiles:       int32(totalFiles),
+		startedAt:        time.Now(),
 	}
 }
 
@@ -152,7 +153,7 @@ func (t *Tracker) SnapshotSummary() Summary {
 		Runtime: RuntimeStats{
 			SchedLatencies: t.runtimeHistogram.SampleLatest(),
 		},
-		General: GeneralStats{
+		AppStats: AppStats{
 			Elapsed:        elapsed,
 			ReadThroughput: readThroughput,
 			FilesDone:      filesDone,

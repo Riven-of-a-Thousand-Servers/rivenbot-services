@@ -103,7 +103,7 @@ dataset`,
 			}
 
 			textHandler := slog.NewTextHandler(logFile, handlerOptions)
-			ringBuf := telemetry.NewRingBuffer(30)
+			ringBuf := telemetry.NewRing[telemetry.LogEntry](30)
 			tuiHandler := logging.NewTuiHandler(ringBuf, slog.LevelInfo.Level())
 
 			slog.SetDefault(slog.New(slog.NewMultiHandler(textHandler, tuiHandler)))

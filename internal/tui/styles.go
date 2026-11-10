@@ -17,16 +17,24 @@ var (
 	valueStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#C0CAF5")).Bold(true)
 
 	headerSeparator = labelStyle.Render("  |  ")
-)
 
-const (
-	headerString = "PGCR dataset import — %s\nCompleted Files: %d/%d   Errors: %d   Elapsed: %s   Throughput: %.0f rows/s   In-Flight: %d"
+	filesPane = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder(), true).
+			BorderForeground(lipgloss.Color("62"))
+
+	logsPane = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder(), true).
+			BorderForeground(lipgloss.Color("62")).
+			AlignHorizontal(lipgloss.Left).
+			AlignVertical(lipgloss.Top)
+
+	gaugePane   = logsPane
+	runtimePane = logsPane
 )
 
 func gradientTitle(text string) string {
 	runes := []rune(text)
-	colors := lipgloss.Blend2D(len(runes), 2, 50, lipgloss.Color("#7D56F4"), lipgloss.Color("#FF6AC1"))
-	// colors := lipgloss.Blend1D(len(runes), lipgloss.Color("#7D56F4"), lipgloss.Color("#FF6AC1"))
+	colors := lipgloss.Blend1D(len(runes), lipgloss.Color("#7D56F4"), lipgloss.Color("#FF6AC1"))
 
 	var b strings.Builder
 	for i, r := range runes {

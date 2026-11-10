@@ -30,6 +30,9 @@ func NewHistogram(samples []metrics.Sample, interval time.Duration, ranges ...ti
 
 	go hist.BackgroundSampling(interval)
 
+	// Store so no nil pointer
+	hist.latest.Store(&[]Bucket{})
+
 	return hist
 }
 
@@ -94,7 +97,7 @@ func (h *Histogram) SampleLatest() []Bucket {
 		return *res
 	}
 
-	return nil
+	return []Bucket{}
 }
 
 func MaxCount(buckets []Bucket) uint64 {
