@@ -41,8 +41,9 @@ import (
 const (
 	DatasetBrokerSize     = 48
 	FileBrokerSize        = 1000
-	EventThroughput       = 20_000
 	CacheEventsBrokerSize = 10
+	SamplerBrokerSize     = 50
+	EventThroughput       = 20_000
 )
 
 const (
@@ -105,6 +106,14 @@ dataset`,
 			textHandler := slog.NewTextHandler(logFile, handlerOptions)
 			ringBuf := telemetry.NewRing[telemetry.LogEntry](30)
 			tuiHandler := logging.NewTuiHandler(ringBuf, slog.LevelInfo.Level())
+			metricsSampler := telemetry.NewSampler(
+				[]metrics.Sample{
+					{Name: "/sched/latencies:seconds"},
+				},
+				SamplerBrokerSize,
+				200*time.Millisecond,
+			)
+			defer metricsSampler.Shutdown()
 
 			slog.SetDefault(slog.New(slog.NewMultiHandler(textHandler, tuiHandler)))
 
@@ -131,8 +140,9 @@ dataset`,
 				return err
 			}
 
+			sub, _ := metricsSampler.Subscribe()
 			hist := telemetry.NewHistogram(
-				[]metrics.Sample{{Name: "/sched/latencies:seconds"}},
+				sub,
 				200*time.Millisecond,
 				1*time.Microsecond,
 				10*time.Microsecond,

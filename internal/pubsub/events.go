@@ -25,6 +25,9 @@ const (
 	ConnectionStarted
 	PingingContext
 	ConnectionSuccesful
+
+	// Runtime Metrics Events
+	RuntimeMetricSample
 )
 
 type CacheEvent struct {
