@@ -125,7 +125,6 @@ dataset`,
 
 			// Discover all .zst files before anything
 			// This cannot fail, otherwise everything goes to shit
-
 			fileWalker := walker.NewFileWalker(opts.RootDir,
 				walker.WithEventsEnabled,
 				walker.WithDirFilter(walker.ExcludeHidden),
@@ -137,9 +136,9 @@ dataset`,
 				return err
 			}
 
-			sub, _ := metricsSampler.Subscribe()
+			samples, _ := metricsSampler.Subscribe()
 			hist := telemetry.NewHistogram(
-				sub,
+				samples,
 				200*time.Millisecond,
 				1*time.Microsecond,
 				10*time.Microsecond,
