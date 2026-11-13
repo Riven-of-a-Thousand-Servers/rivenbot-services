@@ -277,96 +277,9 @@ func groupByMembershipId(report bungie.PostGameCarnageReport) (map[int64][]bungi
 	return groupedPlayers, nil
 }
 
-// Takes in a map of grouped up PGCR entries by players' membershipIds and returns an array of PlayerInformation structs
-// Ensures that each player will have all their characters respectively
-func processPlayers(groups map[int64][]bungie.StatsEntry) ([]bungie.PlayerInfo, error) {
-	result := []bungie.PlayerInfo{}
-	for membershipId, entries := range groups {
-		if len(entries) == 0 {
-			slog.Info("Player with membershipId has no entries, skipping", "MembershipId", membershipId)
-			continue
-		}
-
-		playerInfo := bungie.PlayerInfo{
-			MembershipId:          membershipId,
-			MembershipType:        entries[0].Player.DestinyUserInfo.MembershipType,
-			DisplayName:           entries[0].Player.DestinyUserInfo.DisplayName,
-			IsPublic:              entries[0].Player.DestinyUserInfo.IsPublic,
-			IconPath:              entries[0].Player.DestinyUserInfo.IconPath,
-			GlobalDisplayName:     entries[0].Player.DestinyUserInfo.BungieGlobalDisplayName,
-			GlobalDisplayNameCode: entries[0].Player.DestinyUserInfo.BungieGlobalDisplayNameCode,
-		}
-
-		for _, e := range entries {
-			characterInfo, err := createPlayerCharacter(&e)
-			if err != nil {
-				slog.Error("There was an error create character information for player with Id", "MembershipId", membershipId, "Error", err)
-				return nil, err
-			}
-			playerInfo.CharacterInfo = append(playerInfo.CharacterInfo, *characterInfo)
-		}
-
-		for _, c := range playerInfo.CharacterInfo {
-			if c.ActivityCompleted {
-				playerInfo.Completed = true
-				break
-			}
-		}
-
-		totalTimePlayed := 0
-		for _, c := range playerInfo.CharacterInfo {
-			totalTimePlayed += c.TimePlayedSeconds
-		}
-		playerInfo.TimePlayedSeconds = int32(totalTimePlayed)
-		result = append(result, playerInfo)
-	}
-
-	return result, nil
-}
-
 // Create an individual player character info struct based on a stats entry
 // This utilizes Redis to fetch several pre-indexed manifest objects
 // If querying Redis fails then this method return an error
-func createPlayerCharacter(entry *bungie.StatsEntry) (*bungie.CharacterInfo, error) {
-	characterInfo := bungie.CharacterInfo{
-		ActivityCompleted: entry.Values.Completed == 1.0,
-		WeaponInfo:        []bungie.WeaponInfo{}, // empty just in case the player didn't do anything in the activity
-	}
-
-	class := bungie.CharacterClass(entry.Player.CharacterClass)
-	characterInfo.CharacterId = entry.CharacterId.Int64()
-	characterInfo.LightLevel = entry.Player.LightLevel
-	characterInfo.CharacterClass = class
-	characterInfo.CharacterEmblem = entry.Player.EmblemHash
-	characterInfo.TimePlayedSeconds = int(entry.Values.TimePlayedSeconds)
-	characterInfo.Kills = int(entry.Values.Kills)
-	characterInfo.Deaths = int(entry.Values.Deaths)
-	characterInfo.Assists = int(entry.Values.Assists)
-	characterInfo.Kda = float64(entry.Values.Kda)
-	characterInfo.Kdr = float64(entry.Values.Kdr)
-
-	// Set weapon information
-	if entry.Extended != nil {
-		for _, weapon := range entry.Extended.Weapons {
-			w := bungie.WeaponInfo{
-				WeaponHash:     weapon.ReferenceId,
-				Kills:          int(weapon.Values.WeaponKills),
-				PrecisionKills: int(weapon.Values.PrecisionKills),
-				PrecisionRatio: float64(weapon.Values.PrecisionRatio),
-			}
-			characterInfo.WeaponInfo = append(characterInfo.WeaponInfo, w)
-		}
-
-		// Set ability information
-		abilityInfo := bungie.AbilityInfo{
-			GrenadeKills: int(entry.Extended.Abilities.GrenadeKills),
-			MeleeKills:   int(entry.Extended.Abilities.MeleeKills),
-			SuperKills:   int(entry.Extended.Abilities.SuperKills),
-		}
-		characterInfo.AbilityInfo = abilityInfo
-	}
-	return &characterInfo, nil
-}
 
 func isFlawless(pgcr bungie.PostGameCarnageReport) bool {
 	for _, entry := range pgcr.Entries {

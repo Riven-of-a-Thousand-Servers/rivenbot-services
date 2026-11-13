@@ -24,7 +24,7 @@ const (
 	GarbageCollectionCyces = "/gc/cycles/total:gc-cycles"
 )
 
-var samples []metrics.Sample = []metrics.Sample{
+var Samples []metrics.Sample = []metrics.Sample{
 	{Name: MemoryHeapUsed},
 	{Name: GoroutinesRunning},
 	{Name: GoroutinesWaiting},

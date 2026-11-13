@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
-	"runtime/metrics"
 	"slices"
 	"sync"
 	"syscall"
@@ -107,9 +106,7 @@ dataset`,
 			ringBuf := telemetry.NewRing[telemetry.LogEntry](30)
 			tuiHandler := logging.NewTuiHandler(ringBuf, slog.LevelInfo.Level())
 			metricsSampler := telemetry.NewSampler(
-				[]metrics.Sample{
-					{Name: "/sched/latencies:seconds"},
-				},
+				telemetry.Samples,
 				SamplerBrokerSize,
 				200*time.Millisecond,
 			)
