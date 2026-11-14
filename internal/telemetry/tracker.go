@@ -17,11 +17,11 @@ const (
 )
 
 const (
-	MemoryHeapUsed         = "/memory/classes/heap/objects:bytes"
-	GoroutinesRunning      = "/sched/goroutines/running:goroutines"
-	GoroutinesWaiting      = "/sched/goroutines/waiting:goroutines"
-	GoroutineSaturation    = "/sched/latencies:seconds"
-	GarbageCollectionCyces = "/gc/cycles/total:gc-cycles"
+	MemoryHeapUsed          = "/memory/classes/heap/objects:bytes"
+	GoroutinesRunning       = "/sched/goroutines/running:goroutines"
+	GoroutinesWaiting       = "/sched/goroutines/waiting:goroutines"
+	GoroutineSaturation     = "/sched/latencies:seconds"
+	GarbageCollectionCycles = "/gc/cycles/total:gc-cycles"
 )
 
 var Samples []metrics.Sample = []metrics.Sample{
@@ -29,7 +29,7 @@ var Samples []metrics.Sample = []metrics.Sample{
 	{Name: GoroutinesRunning},
 	{Name: GoroutinesWaiting},
 	{Name: GoroutineSaturation},
-	{Name: GarbageCollectionCyces},
+	{Name: GarbageCollectionCycles},
 }
 
 type Tracker struct {
