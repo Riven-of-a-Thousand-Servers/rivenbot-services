@@ -16,20 +16,26 @@ const (
 	Finished
 )
 
+type RuntimeMetric string
+
 const (
-	MemoryHeapUsed          = "/memory/classes/heap/objects:bytes"
-	GoroutinesRunning       = "/sched/goroutines/running:goroutines"
-	GoroutinesWaiting       = "/sched/goroutines/waiting:goroutines"
-	GoroutineSaturation     = "/sched/latencies:seconds"
-	GarbageCollectionCycles = "/gc/cycles/total:gc-cycles"
+	MemoryHeapUsed          RuntimeMetric = "/memory/classes/heap/objects:bytes"
+	GoroutinesRunning       RuntimeMetric = "/sched/goroutines/running:goroutines"
+	GoroutinesWaiting       RuntimeMetric = "/sched/goroutines/waiting:goroutines"
+	GoroutineSaturation     RuntimeMetric = "/sched/latencies:seconds"
+	GarbageCollectionCycles RuntimeMetric = "/gc/cycles/total:gc-cycles"
 )
 
+func (r RuntimeMetric) String() string {
+	return string(r)
+}
+
 var Samples []metrics.Sample = []metrics.Sample{
-	{Name: MemoryHeapUsed},
-	{Name: GoroutinesRunning},
-	{Name: GoroutinesWaiting},
-	{Name: GoroutineSaturation},
-	{Name: GarbageCollectionCycles},
+	{Name: MemoryHeapUsed.String()},
+	{Name: GoroutinesRunning.String()},
+	{Name: GoroutinesWaiting.String()},
+	{Name: GoroutineSaturation.String()},
+	{Name: GarbageCollectionCycles.String()},
 }
 
 type Tracker struct {

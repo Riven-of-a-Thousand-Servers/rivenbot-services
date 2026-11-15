@@ -9,7 +9,10 @@ import (
 	"pgcr-processing-service/internal/pubsub"
 
 	"gotest.tools/v3/assert"
+	"gotest.tools/v3/poll"
 )
+
+const DoesntExist RuntimeMetric = "thisShouldntWork"
 
 type mockSampler struct {
 	samples  []metrics.Sample
@@ -26,77 +29,123 @@ func newMockSampler(samples []metrics.Sample, interval time.Duration) *mockSampl
 	}
 }
 
-func (m *mockSampler) PushSamples(count int) chan pubsub.Event[[]metrics.Sample] {
+// publishSamples will send n amount of samples at a given interval to its declared channel
+func (m *mockSampler) publishSamples(count int) chan pubsub.Event[[]metrics.Sample] {
 	ch := make(chan pubsub.Event[[]metrics.Sample])
 	m.ch = ch
 
 	go func() {
-		ticker := time.NewTicker(m.interval)
-		defer ticker.Stop()
+		defer close(m.done)
 		defer close(m.ch)
 
 		for range count {
-			select {
-			case <-m.done:
-				return
-			case <-ticker.C:
-				metrics.Read(m.samples)
-				ch <- pubsub.Event[[]metrics.Sample]{
-					Type:    pubsub.RuntimeMetricSample,
-					Payload: m.samples,
-				}
+			time.Sleep(m.interval)
+			metrics.Read(m.samples)
+			ch <- pubsub.Event[[]metrics.Sample]{
+				Type:    pubsub.RuntimeMetricSample,
+				Payload: m.samples,
 			}
 		}
-
-		m.done <- struct{}{}
 	}()
 
 	return ch
 }
 
-func Test_TimeseriesSampling(t *testing.T) {
+func Test_Timeseries_InvalidInterval(t *testing.T) {
+	var tests map[string]time.Duration = map[string]time.Duration{
+		"Zero duration":     0 * time.Second,
+		"Negative duration": -1 * time.Second,
+	}
+
+	for testName, interval := range tests {
+		t.Run(testName, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+
+			samples := []metrics.Sample{
+				{Name: MemoryHeapUsed.String()},
+			}
+
+			sampler := newMockSampler(samples, 1*time.Second)
+			ch := sampler.publishSamples(0)
+
+			_, err := NewTimeseries[uint64](ctx, MemoryHeapUsed, ch, interval, 20)
+			if err == nil {
+				t.Fatalf("expecting error, got none")
+			}
+		})
+	}
+}
+
+func Test_Timeseries_InvalidKind(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
 	samples := []metrics.Sample{
-		{Name: MemoryHeapUsed},
+		{Name: MemoryHeapUsed.String()},
+	}
+	sampler := newMockSampler(samples, 500*time.Millisecond)
+	ch := sampler.publishSamples(1)
+	_, err := NewTimeseries[float64](ctx, DoesntExist, ch, 200*time.Millisecond, 20)
+	if err == nil {
+		t.Fatal("expecting error, got none")
+	}
+}
+
+func Test_Timeseries_InvalidHistogram(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	samples := []metrics.Sample{
+		{Name: MemoryHeapUsed.String()},
+	}
+	sampler := newMockSampler(samples, 500*time.Millisecond)
+	ch := sampler.publishSamples(1)
+	_, err := NewTimeseries[float64](ctx, GarbageCollectionCycles, ch, 200*time.Millisecond, 20)
+	if err == nil {
+		t.Fatal("expecting error, got none")
+	}
+}
+
+func Test_TimeseriesSampling(t *testing.T) {
+	ctx := context.Background()
+	samples := []metrics.Sample{
+		{Name: MemoryHeapUsed.String()},
 	}
 	sampler := newMockSampler(samples, 500*time.Millisecond)
 
-	ch := sampler.PushSamples(5)
-	sut, err := NewTimeseries[uint64](ctx, MemoryHeapUsed, ch, 500*time.Millisecond, 20)
-	if err != nil {
-		t.Fatalf("not expecting error, got: %v", err)
-	}
+	ch := sampler.publishSamples(5)
+	sut, err := NewTimeseries[uint64](ctx, MemoryHeapUsed, ch, 200*time.Millisecond, 20)
 
-	// Wait for 5 seconds to be done
-	<-ctx.Done()
+	assert.NilError(t, err)
+	<-sampler.done
 
-	assert.Equal(t, sut.hasData, true)
-	assert.Equal(t, sut.buf.total, 5)
+	poll.WaitOn(t, func(t poll.LogT) poll.Result {
+		_, _, hasData := sut.MinMax()
+		if hasData && sut.buf.Len() >= 5 {
+			return poll.Success()
+		}
+
+		return poll.Continue("waiting until timeseries has data and buffer has more than 5 elements")
+	}, poll.WithTimeout(2*time.Second))
 }
 
 func Test_Timeseries_PushSampleWorksSuccessfully(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
+	ctx := context.Background()
 	samples := []metrics.Sample{
-		{Name: MemoryHeapUsed},
+		{Name: MemoryHeapUsed.String()},
 	}
 
-	sampler := newMockSampler(samples, 200*time.Millisecond)
-	ch := sampler.PushSamples(2)
-
-	sut, err := NewTimeseries[uint64](ctx, MemoryHeapUsed, ch, 500*time.Millisecond, 20)
-
+	sampler := newMockSampler(samples, 100*time.Millisecond)
+	ch := sampler.publishSamples(2)
+	sut, err := NewTimeseries[uint64](ctx, MemoryHeapUsed, ch, 50*time.Millisecond, 20)
 	assert.NilError(t, err)
 
-	<-ctx.Done()
-	sut.Close()
-
-	max, min, hasData := sut.MinMax()
-
-	assert.Check(t, max != 0)
-	assert.Check(t, min != 0)
-	assert.Check(t, hasData)
-	assert.Equal(t, sut.buf.total, 2)
+	<-sampler.done
+	poll.WaitOn(t, func(t poll.LogT) poll.Result {
+		if sut.buf.Len() >= 2 {
+			return poll.Success()
+		}
+		return poll.Continue("waiting for 2 points")
+	}, poll.WithTimeout(2*time.Second))
 }

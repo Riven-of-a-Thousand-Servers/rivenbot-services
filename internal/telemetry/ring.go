@@ -52,3 +52,9 @@ func (b *Ring[T]) Last(n int) []T {
 
 	return res
 }
+
+func (r *Ring[T]) Len() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.total
+}

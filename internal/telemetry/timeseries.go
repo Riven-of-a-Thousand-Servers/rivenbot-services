@@ -17,8 +17,7 @@ type MetricType interface {
 }
 
 type Timeseries[T MetricType] struct {
-	// Ring buffer of type T
-	metric          string
+	metric          RuntimeMetric
 	buf             *Ring[T]
 	refreshInterval time.Duration
 	max, min        T
@@ -33,13 +32,13 @@ type Timeseries[T MetricType] struct {
 
 func NewTimeseries[T MetricType](
 	ctx context.Context,
-	metric string,
+	metric RuntimeMetric,
 	samples <-chan pubsub.Event[[]metrics.Sample],
-	refreshInterval time.Duration,
+	refresh time.Duration,
 	size int,
 ) (*Timeseries[T], error) {
-	if refreshInterval <= 0 {
-		return nil, fmt.Errorf("refresh interval must be positive, got %v", refreshInterval.Abs())
+	if refresh <= 0 {
+		return nil, fmt.Errorf("refresh interval must be positive, got %v", refresh.Abs())
 	}
 
 	if err := validateKind[T](metric); err != nil {
@@ -53,7 +52,7 @@ func NewTimeseries[T MetricType](
 		buf:             NewRing[T](size),
 		samples:         samples,
 		cancel:          cancel,
-		refreshInterval: refreshInterval,
+		refreshInterval: refresh,
 		done:            make(chan struct{}),
 	}
 
@@ -65,7 +64,7 @@ func NewTimeseries[T MetricType](
 	return t, nil
 }
 
-func validateKind[T any](metric string) error {
+func validateKind[T any](metric RuntimeMetric) error {
 	var want metrics.ValueKind
 	switch reflect.TypeFor[T]().Kind() {
 	case reflect.Float64:
@@ -75,7 +74,7 @@ func validateKind[T any](metric string) error {
 	}
 
 	for _, d := range metrics.All() {
-		if d.Name != metric {
+		if d.Name != metric.String() {
 			continue
 		}
 
@@ -104,6 +103,9 @@ func (t *Timeseries[T]) startSampling(ctx context.Context) {
 			return
 		case event, ok := <-t.samples:
 			if !ok {
+				if pending {
+					t.pushSample(latest)
+				}
 				return
 			}
 			latest, pending = event, true
@@ -119,7 +121,7 @@ func (t *Timeseries[T]) startSampling(ctx context.Context) {
 func (t *Timeseries[T]) pushSample(event pubsub.Event[[]metrics.Sample]) {
 	// Literally just a reusable function to compare a metric.Sample to a metric name
 	f := func(e metrics.Sample) bool {
-		return e.Name == t.metric
+		return e.Name == t.metric.String()
 	}
 	idx := slices.IndexFunc(event.Payload, f)
 
