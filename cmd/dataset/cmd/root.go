@@ -43,9 +43,7 @@ const (
 	CacheEventsBrokerSize = 10
 	SamplerBrokerSize     = 50
 	EventThroughput       = 20_000
-)
 
-const (
 	logFileName        = "dataset.log"
 	deadLetterFileName = "quarantine.log"
 )
@@ -137,14 +135,21 @@ dataset`,
 			}
 
 			samples, _ := metricsSampler.Subscribe()
+
+			timeline := []time.Duration{
+				200 * time.Millisecond,
+				1 * time.Microsecond,
+				10 * time.Microsecond,
+				100 * time.Microsecond,
+				1 * time.Millisecond,
+				10 * time.Millisecond,
+			}
+
 			hist := telemetry.NewHistogram(
+				globalCtx,
 				samples,
-				200*time.Millisecond,
-				1*time.Microsecond,
-				10*time.Microsecond,
-				100*time.Microsecond,
-				1*time.Millisecond,
-				10*time.Millisecond,
+				telemetry.GarbageCollectionCycles,
+				timeline...,
 			)
 
 			cleanup = append(cleanup, hist.Close)

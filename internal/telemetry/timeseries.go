@@ -155,6 +155,10 @@ func (t *Timeseries[T]) observe(val T) {
 	t.min = min(val, t.min)
 }
 
+func (t *Timeseries[T]) Last(n int) []T {
+	return t.buf.Last(n)
+}
+
 // Read max, min and hasData under a Read-lock mutex
 func (t *Timeseries[T]) MinMax() (T, T, bool) {
 	t.mu.RLock()

@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"context"
 	"runtime/metrics"
 	"sync/atomic"
 	"time"
@@ -12,11 +13,17 @@ import (
 // a visualization of buckets with values
 type Histogram struct {
 	// timeRanges are the buckets in which the histogram will
-	// try to aggregate points for
-	timeRanges  []time.Duration
-	latest      atomic.Pointer[[]Bucket]
-	metricsChan <-chan pubsub.Event[[]metrics.Sample]
-	stopChan    chan struct{}
+	// try to aggregate points for the specified runtime metric
+	timeRanges []time.Duration
+
+	// metric to sample for
+	metric RuntimeMetric
+
+	latest    atomic.Pointer[[]Bucket]
+	samplerCh <-chan pubsub.Event[[]metrics.Sample]
+
+	cancel context.CancelFunc
+	done   chan struct{}
 }
 
 type Bucket struct {
@@ -25,34 +32,45 @@ type Bucket struct {
 	Last  bool
 }
 
-func NewHistogram(metricsChan <-chan pubsub.Event[[]metrics.Sample],
+func NewHistogram(
+	ctx context.Context,
+	metricsChan <-chan pubsub.Event[[]metrics.Sample],
+	metric RuntimeMetric,
 	ranges ...time.Duration,
 ) *Histogram {
-	hist := &Histogram{
-		timeRanges:  ranges,
-		metricsChan: metricsChan,
-		stopChan:    make(chan struct{}),
+	newCtx, cancel := context.WithCancel(ctx)
+
+	h := &Histogram{
+		timeRanges: ranges,
+		samplerCh:  metricsChan,
+		done:       make(chan struct{}),
+		cancel:     cancel,
 	}
 
-	go hist.ReadSamples()
+	go func() {
+		defer close(h.done)
+		h.startSampling(newCtx)
+	}()
 
-	// Store so no nil pointer
-	hist.latest.Store(&[]Bucket{})
+	// Empty slice so no nil pointer
+	h.latest.Store(&[]Bucket{})
 
-	return hist
+	return h
 }
 
 // ReadSamples runs as soon as the histogram is made
 // It runs every interval and stores the result in latest
 // Additionally, stores the previous sample in a function
 // variable caled prev
-func (h *Histogram) ReadSamples() {
+func (h *Histogram) startSampling(ctx context.Context) {
 	var prev []uint64
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		// Each tick we sample and save the latest entry to the atomic.Pointer entry
 		// in the Histogram
-		case metrics := <-h.metricsChan:
+		case metrics := <-h.samplerCh:
 			hist := metrics.Payload[0].Value.Float64Histogram()
 			delta := make([]uint64, len(hist.Counts))
 			if prev != nil {
@@ -83,7 +101,7 @@ func (h *Histogram) ReadSamples() {
 			buckets[len(buckets)-1] = overflowBucket
 
 			h.latest.Store(&buckets)
-		case <-h.stopChan:
+		case <-h.done:
 			return
 		}
 	}
@@ -115,6 +133,6 @@ func (h *Histogram) GetRanges() []string {
 }
 
 func (h *Histogram) Close() error {
-	close(h.stopChan)
+	close(h.done)
 	return nil
 }

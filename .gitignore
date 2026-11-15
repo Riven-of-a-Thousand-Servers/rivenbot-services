@@ -6,3 +6,6 @@ bin/*
 
 # Ignore slog .log files
 *.log
+
+# Ignore coverage files
+*.out

@@ -39,11 +39,13 @@ var Samples []metrics.Sample = []metrics.Sample{
 }
 
 type Tracker struct {
-	logBuf           *Ring[LogEntry]
-	mu               sync.RWMutex
-	nextId           int
-	totalFiles       int32
+	logBuf     *Ring[LogEntry]
+	mu         sync.RWMutex
+	nextId     int
+	totalFiles int32
+
 	runtimeHistogram *Histogram
+	heapTimeseries   *Timeseries[uint64]
 
 	startedAt time.Time
 	gauges    []Gauge
@@ -68,6 +70,7 @@ type AppStats struct {
 
 type RuntimeStats struct {
 	SchedLatencies []Bucket
+	HeapUsedBytes  []uint64
 }
 
 // Job represents the task a Task Worker is tasked with doing
@@ -158,6 +161,7 @@ func (t *Tracker) SnapshotSummary() Summary {
 	return Summary{
 		Runtime: RuntimeStats{
 			SchedLatencies: t.runtimeHistogram.SampleLatest(),
+			HeapUsedBytes:  t.heapTimeseries.Last(20), // TODO: Need to dynamically adjust this
 		},
 		AppStats: AppStats{
 			Elapsed:        elapsed,
