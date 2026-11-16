@@ -18,12 +18,12 @@ import (
 )
 
 // Pgcr maps fields from the Raw PGCR json fields to equivalent database entities
-type DbMapper struct {
+type PgcrMapper struct {
 	manifestCache cache.ManifestCache[manifest.Entry]
 }
 
-func New(cache cache.ManifestCache[manifest.Entry]) *DbMapper {
-	return &DbMapper{
+func New(cache cache.ManifestCache[manifest.Entry]) *PgcrMapper {
+	return &PgcrMapper{
 		manifestCache: cache,
 	}
 }
@@ -32,7 +32,7 @@ const (
 	pstTimezone string = "America/Los_Angeles"
 )
 
-func (m *DbMapper) MapToDestinyPlayers(pgcr bungie.PostGameCarnageReport) []db.CreateDestinyPlayerParams {
+func (m *PgcrMapper) MapToDestinyPlayers(pgcr bungie.PostGameCarnageReport) []db.CreateDestinyPlayerParams {
 	players := getUniquePlayers(pgcr)
 	entities := make([]db.CreateDestinyPlayerParams, 0, len(players))
 	for _, player := range players {
@@ -71,7 +71,7 @@ func getUniquePlayers(pgcr bungie.PostGameCarnageReport) map[string]bungie.Desti
 }
 
 // Compresses the PostGameCarnageReport and returns the associated DB entity
-func (m *DbMapper) MapToBlobObject(pgcr bungie.PostGameCarnageReport) (db.CreatePgcrParams, error) {
+func (m *PgcrMapper) MapToBlobObject(pgcr bungie.PostGameCarnageReport) (db.CreatePgcrParams, error) {
 	var params db.CreatePgcrParams
 	raw, err := compress.Gzip(pgcr)
 	if err != nil {
@@ -85,7 +85,7 @@ func (m *DbMapper) MapToBlobObject(pgcr bungie.PostGameCarnageReport) (db.Create
 
 // Fetches all weapon definitions from a PGCR from all players into the its corresponding
 // database entities
-func (m *DbMapper) MapToDBWeapons(ctx context.Context, pgcr bungie.PostGameCarnageReport) ([]db.CreateWeaponParams, error) {
+func (m *PgcrMapper) MapToDBWeapons(ctx context.Context, pgcr bungie.PostGameCarnageReport) ([]db.CreateWeaponParams, error) {
 	var weps []db.CreateWeaponParams
 	for _, entry := range pgcr.Entries {
 		if entry.Extended == nil {
@@ -126,7 +126,7 @@ func (m *DbMapper) MapToDBWeapons(ctx context.Context, pgcr bungie.PostGameCarna
 	return weps, nil
 }
 
-func (m *DbMapper) MapToDBInstance(pgcr bungie.PostGameCarnageReport) (db.CreateInstanceParams, error) {
+func (m *PgcrMapper) MapToDBInstance(pgcr bungie.PostGameCarnageReport) (db.CreateInstanceParams, error) {
 	startTime, err := time.Parse(time.RFC3339, pgcr.Period)
 	isFlawless := isFlawless(pgcr)
 	isFresh, err := isFresh(&pgcr, isFlawless)
@@ -158,7 +158,7 @@ func (m *DbMapper) MapToDBInstance(pgcr bungie.PostGameCarnageReport) (db.Create
 	}, nil
 }
 
-func (m *DbMapper) MapToInstancePlayers(pgcr bungie.PostGameCarnageReport) ([]db.CreateInstancePlayerParams, error) {
+func (m *PgcrMapper) MapToInstancePlayers(pgcr bungie.PostGameCarnageReport) ([]db.CreateInstancePlayerParams, error) {
 	var players []db.CreateInstancePlayerParams
 	groupedPlayers, err := groupByMembershipId(pgcr)
 	if err != nil {
@@ -177,7 +177,7 @@ func (m *DbMapper) MapToInstancePlayers(pgcr bungie.PostGameCarnageReport) ([]db
 	return players, nil
 }
 
-func (m *DbMapper) MapToInstanceToons(pgcr bungie.PostGameCarnageReport) ([]db.CreateInstanceCharacterParams, error) {
+func (m *PgcrMapper) MapToInstanceToons(pgcr bungie.PostGameCarnageReport) ([]db.CreateInstanceCharacterParams, error) {
 	var params []db.CreateInstanceCharacterParams
 	grouped, err := groupByMembershipId(pgcr)
 	if err != nil {
@@ -215,7 +215,7 @@ func (m *DbMapper) MapToInstanceToons(pgcr bungie.PostGameCarnageReport) ([]db.C
 	return params, nil
 }
 
-func (m *DbMapper) MapToInstanceToonWeapons(pgcr bungie.PostGameCarnageReport) ([]db.CreateInstanceCharacterWeaponParams, error) {
+func (m *PgcrMapper) MapToInstanceToonWeapons(pgcr bungie.PostGameCarnageReport) ([]db.CreateInstanceCharacterWeaponParams, error) {
 	var weapons []db.CreateInstanceCharacterWeaponParams
 	grouped, err := groupByMembershipId(pgcr)
 	if err != nil {

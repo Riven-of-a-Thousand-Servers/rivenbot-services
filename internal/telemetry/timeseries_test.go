@@ -107,7 +107,7 @@ func Test_Timeseries_InvalidInterval(t *testing.T) {
 			sampler := newMockSampler(samples, WithInterval(1*time.Second))
 			ch := sampler.publishSamples(0)
 
-			_, err := NewTimeseries[uint64](ctx, MemoryHeapUsed, ch, interval, 20)
+			_, err := NewTimeseries[uint64](ctx, MemoryHeapUsed, ch, interval)
 			if err == nil {
 				t.Fatalf("expecting error, got none")
 			}
@@ -124,7 +124,7 @@ func Test_Timeseries_InvalidKind(t *testing.T) {
 	}
 	sampler := newMockSampler(samples, WithInterval(500*time.Millisecond))
 	ch := sampler.publishSamples(1)
-	_, err := NewTimeseries[float64](ctx, DoesntExist, ch, 200*time.Millisecond, 20)
+	_, err := NewTimeseries[float64](ctx, DoesntExist, ch, 200*time.Millisecond)
 	if err == nil {
 		t.Fatal("expecting error, got none")
 	}
@@ -139,7 +139,7 @@ func Test_Timeseries_InvalidHistogram(t *testing.T) {
 	}
 	sampler := newMockSampler(samples, WithInterval(500*time.Millisecond))
 	ch := sampler.publishSamples(1)
-	_, err := NewTimeseries[float64](ctx, GarbageCollectionCycles, ch, 200*time.Millisecond, 20)
+	_, err := NewTimeseries[float64](ctx, GarbageCollectionCycles, ch, 200*time.Millisecond)
 	if err == nil {
 		t.Fatal("expecting error, got none")
 	}
@@ -153,7 +153,7 @@ func Test_TimeseriesSampling(t *testing.T) {
 	sampler := newMockSampler(samples, WithInterval(500*time.Millisecond))
 
 	ch := sampler.publishSamples(5)
-	sut, err := NewTimeseries[uint64](ctx, MemoryHeapUsed, ch, 200*time.Millisecond, 20)
+	sut, err := NewTimeseries[uint64](ctx, MemoryHeapUsed, ch, 200*time.Millisecond)
 
 	assert.NilError(t, err)
 	<-sampler.done
@@ -176,7 +176,7 @@ func Test_Timeseries_PushSampleWorksSuccessfully(t *testing.T) {
 
 	sampler := newMockSampler(samples, WithInterval(100*time.Millisecond))
 	ch := sampler.publishSamples(2)
-	sut, err := NewTimeseries[uint64](ctx, MemoryHeapUsed, ch, 50*time.Millisecond, 20)
+	sut, err := NewTimeseries[uint64](ctx, MemoryHeapUsed, ch, 50*time.Millisecond)
 	assert.NilError(t, err)
 
 	<-sampler.done

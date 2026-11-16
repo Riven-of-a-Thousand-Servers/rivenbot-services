@@ -99,7 +99,7 @@ func newProcessCommand() *cobra.Command {
 
 				mapper := mapper.New(redisCache)
 
-				itemWriter = writer.NewPgcrWriter(conn, queries, mapper, FileBrokerSize)
+				itemWriter = writer.NewPgcrWriter(conn, queries, mapper)
 			}
 
 			ch, err := rabbitmq.Consume(ctx)

@@ -4,6 +4,8 @@ import (
 	"sync"
 )
 
+var brokerSize = 2048
+
 type Event[T any] struct {
 	Type    EventType
 	Payload T
@@ -16,7 +18,15 @@ type Broker[T any] struct {
 	subs       map[chan Event[T]]struct{}
 }
 
-func NewBroker[T any](bufferSize int) *Broker[T] {
+func NewBroker[T any]() *Broker[T] {
+	return &Broker[T]{
+		subs:       make(map[chan Event[T]]struct{}),
+		done:       make(chan struct{}),
+		bufferSize: brokerSize,
+	}
+}
+
+func NewBrokerWithOpts[T any](bufferSize int) *Broker[T] {
 	return &Broker[T]{
 		subs:       make(map[chan Event[T]]struct{}),
 		done:       make(chan struct{}),
@@ -64,10 +74,10 @@ func (b *Broker[T]) Publish(t EventType, payload T) {
 	}
 }
 
-func (b *Broker[T]) Shutdown() {
+func (b *Broker[T]) Shutdown() error {
 	select {
 	case <-b.done:
-		return
+		return nil
 	default:
 		close(b.done)
 	}
@@ -79,4 +89,6 @@ func (b *Broker[T]) Shutdown() {
 		delete(b.subs, ch)
 		close(ch)
 	}
+
+	return nil
 }

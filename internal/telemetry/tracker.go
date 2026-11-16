@@ -1,42 +1,13 @@
 package telemetry
 
 import (
-	"runtime/metrics"
+	"context"
+	"errors"
+	"log/slog"
 	"slices"
 	"sync"
 	"time"
 )
-
-type TaskState int32
-
-const (
-	Queued TaskState = iota + 1
-	Started
-	Errored
-	Finished
-)
-
-type RuntimeMetric string
-
-const (
-	MemoryHeapUsed          RuntimeMetric = "/memory/classes/heap/objects:bytes"
-	GoroutinesRunning       RuntimeMetric = "/sched/goroutines/running:goroutines"
-	GoroutinesWaiting       RuntimeMetric = "/sched/goroutines/waiting:goroutines"
-	GoroutineSaturation     RuntimeMetric = "/sched/latencies:seconds"
-	GarbageCollectionCycles RuntimeMetric = "/gc/cycles/total:gc-cycles"
-)
-
-func (r RuntimeMetric) String() string {
-	return string(r)
-}
-
-var Samples []metrics.Sample = []metrics.Sample{
-	{Name: MemoryHeapUsed.String()},
-	{Name: GoroutinesRunning.String()},
-	{Name: GoroutinesWaiting.String()},
-	{Name: GoroutineSaturation.String()},
-	{Name: GarbageCollectionCycles.String()},
-}
 
 type Tracker struct {
 	logBuf     *Ring[LogEntry]
@@ -44,8 +15,16 @@ type Tracker struct {
 	nextId     int
 	totalFiles int32
 
-	runtimeHistogram *Histogram
-	heapTimeseries   *Timeseries[uint64]
+	// sampler will periodically fetch runtime metrics from Go
+	// histograms and timeseries can then subscribe to it to
+	// receive data from it
+	sampler *MetricsSampler
+
+	gcCyclesHistogram *Histogram
+	heapTimeseries    *Timeseries[uint64]
+
+	cleanup   []func() error
+	closeOnce sync.Once
 
 	startedAt time.Time
 	gauges    []Gauge
@@ -81,28 +60,46 @@ type Job[T any] struct {
 	Task *Task
 }
 
-func (t TaskState) String() string {
-	switch t {
-	case Started:
-		return "Started"
-	case Queued:
-		return "Queued"
-	case Errored:
-		return "Errored"
-	case Finished:
-		return "Finished"
-	default:
-		return ""
-	}
-}
+func NewTracker(ctx context.Context, buf *Ring[LogEntry], totalFiles int) (*Tracker, error) {
+	var err error
 
-func DefaultTracker(buf *Ring[LogEntry], hist *Histogram, totalFiles int) *Tracker {
-	return &Tracker{
-		logBuf:           buf,
-		runtimeHistogram: hist,
-		totalFiles:       int32(totalFiles),
-		startedAt:        time.Now(),
+	t := &Tracker{
+		logBuf:     buf,
+		totalFiles: int32(totalFiles),
+		startedAt:  time.Now(),
 	}
+
+	sampler := NewSampler(Samples, 500*time.Millisecond)
+	sampler.Start(ctx)
+	t.cleanup = append(t.cleanup, sampler.Close)
+
+	buckets := []time.Duration{
+		1 * time.Microsecond,
+		10 * time.Microsecond,
+		100 * time.Microsecond,
+		1 * time.Millisecond,
+		10 * time.Millisecond,
+	}
+
+	histSub, unsub1 := sampler.Subscribe()
+	t.gcCyclesHistogram = NewHistogram(ctx, histSub, SchedulerLatencies, buckets...)
+	t.cleanup = append(t.cleanup,
+		t.gcCyclesHistogram.Close,
+		wrap(unsub1),
+	)
+
+	timeSub, unsub2 := sampler.Subscribe()
+	t.heapTimeseries, err = NewTimeseries[uint64](ctx, MemoryHeapUsed, timeSub, 1*time.Second)
+	if err != nil {
+		slog.Error("failed to create telemetry tracker", "error", err)
+		return nil, err
+	}
+	t.cleanup = append(t.cleanup,
+		t.heapTimeseries.Close,
+		wrap(unsub2),
+	)
+
+	return t, nil
 }
 
 // AddTask registers a Task and subsequently returns a pointer to it
@@ -115,6 +112,7 @@ func (t *Tracker) AddTask(file string, linesTotal int) *Task {
 		LinesTotal: linesTotal,
 	}
 	t.tasks = append(t.tasks, task)
+
 	return task
 }
 
@@ -160,7 +158,7 @@ func (t *Tracker) SnapshotSummary() Summary {
 
 	return Summary{
 		Runtime: RuntimeStats{
-			SchedLatencies: t.runtimeHistogram.SampleLatest(),
+			SchedLatencies: t.gcCyclesHistogram.SampleLatest(),
 			HeapUsedBytes:  t.heapTimeseries.Last(20), // TODO: Need to dynamically adjust this
 		},
 		AppStats: AppStats{
@@ -178,11 +176,11 @@ func (t *Tracker) SnapshotSummary() Summary {
 
 func (t *Tracker) SnapshotTasks() []TaskView {
 	t.mu.RLock()
-	entries := slices.Clone(t.tasks)
+	tasks := slices.Clone(t.tasks)
 	t.mu.RUnlock()
 
-	ringBuffer := make([]TaskView, 0, len(entries))
-	for _, task := range entries {
+	ringBuffer := make([]TaskView, 0, len(tasks))
+	for _, task := range tasks {
 		ringBuffer = append(ringBuffer, task.View())
 	}
 	return ringBuffer
@@ -215,5 +213,28 @@ func (t *Tracker) RegisterGauge(name, unit string, fn GaugeFunc) (unregister fun
 		t.gauges = slices.DeleteFunc(t.gauges, func(e Gauge) bool {
 			return e.id == id
 		})
+	}
+}
+
+func (t *Tracker) Close() error {
+	var err error
+	t.closeOnce.Do(func() {
+		var errs []error
+		for _, c := range slices.Backward(t.cleanup) {
+			if err := c(); err != nil {
+				errs = append(errs, err)
+			}
+		}
+
+		err = errors.Join(errs...)
+	})
+
+	return err
+}
+
+func wrap(f func()) func() error {
+	return func() error {
+		f()
+		return nil
 	}
 }

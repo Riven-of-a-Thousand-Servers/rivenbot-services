@@ -50,13 +50,12 @@ type FileConsumer struct {
 
 func NewFileConsumer(idx walker.FileIndex,
 	tracker *telemetry.Tracker,
-	brokerSize int,
 	opts ConsumerOpts,
 ) *FileConsumer {
 	c := &FileConsumer{
 		fileIndex: idx,
 		tracker:   tracker,
-		Broker:    pubsub.NewBroker[File](brokerSize),
+		Broker:    pubsub.NewBroker[File](),
 		numFiles:  opts.NumFiles,
 		numLines:  opts.NumLines,
 		ch:        make(chan telemetry.Job[Delivery[dataset.RawContent]], 2048), // why 2048? Idk tbh

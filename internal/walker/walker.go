@@ -11,8 +11,6 @@ import (
 	"pgcr-processing-service/internal/pubsub"
 )
 
-const defaultEventBroker = 50
-
 type FileIndex []FileEntry
 
 type FilterFunc func(fs.DirEntry) bool
@@ -58,7 +56,7 @@ func NewFileWalker(root string, opts ...WalkerOption) *FileWalker {
 	}
 
 	if w.eventsEnabled {
-		w.Broker = pubsub.NewBroker[FileEntry](defaultEventBroker)
+		w.Broker = pubsub.NewBroker[FileEntry]()
 	}
 
 	return w

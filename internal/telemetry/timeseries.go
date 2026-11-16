@@ -12,6 +12,8 @@ import (
 	"pgcr-processing-service/internal/pubsub"
 )
 
+var ringBufferSize = 50
+
 type MetricType interface {
 	~float64 | ~uint64
 }
@@ -35,7 +37,6 @@ func NewTimeseries[T MetricType](
 	metric RuntimeMetric,
 	samples <-chan pubsub.Event[[]metrics.Sample],
 	refresh time.Duration,
-	size int,
 ) (*Timeseries[T], error) {
 	if refresh <= 0 {
 		return nil, fmt.Errorf("refresh interval must be positive, got %v", refresh.Abs())
@@ -49,7 +50,7 @@ func NewTimeseries[T MetricType](
 
 	t := &Timeseries[T]{
 		metric:          metric,
-		buf:             NewRing[T](size),
+		buf:             NewRing[T](ringBufferSize),
 		samples:         samples,
 		cancel:          cancel,
 		refreshInterval: refresh,

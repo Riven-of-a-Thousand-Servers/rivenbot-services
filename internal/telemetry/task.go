@@ -5,6 +5,30 @@ import (
 	"time"
 )
 
+type TaskState int32
+
+const (
+	Queued TaskState = iota + 1
+	Started
+	Errored
+	Finished
+)
+
+func (t TaskState) String() string {
+	switch t {
+	case Started:
+		return "Started"
+	case Queued:
+		return "Queued"
+	case Errored:
+		return "Errored"
+	case Finished:
+		return "Finished"
+	default:
+		return ""
+	}
+}
+
 type Task struct {
 	Filename   string
 	LinesTotal int

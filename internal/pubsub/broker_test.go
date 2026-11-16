@@ -12,7 +12,7 @@ type someStruct struct {
 }
 
 func TestSubscription(t *testing.T) {
-	s := NewBroker[someStruct](5)
+	s := NewBrokerWithOpts[someStruct](5)
 	ch, unsub := s.Subscribe()
 	defer unsub()
 
@@ -29,7 +29,7 @@ func TestSubscription(t *testing.T) {
 
 func TestPublishingDropsPackets(t *testing.T) {
 	size := 2
-	s := NewBroker[someStruct](size)
+	s := NewBrokerWithOpts[someStruct](size)
 	ch, unsub := s.Subscribe()
 	defer unsub()
 
@@ -43,7 +43,7 @@ func TestPublishingDropsPackets(t *testing.T) {
 }
 
 func TestUnsubFunction(t *testing.T) {
-	s := NewBroker[someStruct](1)
+	s := NewBrokerWithOpts[someStruct](1)
 	_, unsub1 := s.Subscribe()
 	_, unsub2 := s.Subscribe()
 

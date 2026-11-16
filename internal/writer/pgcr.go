@@ -24,7 +24,7 @@ var (
 type PgcrWriter struct {
 	db      *sql.DB
 	queries *db.Queries
-	mapper  *mapper.DbMapper
+	mapper  *mapper.PgcrMapper
 
 	writing atomic.Int32
 }
@@ -32,8 +32,7 @@ type PgcrWriter struct {
 // Full Processor with RabbitMQ as an extra dependency
 func NewPgcrWriter(db *sql.DB,
 	queries *db.Queries,
-	mapper *mapper.DbMapper,
-	brokerSize int,
+	mapper *mapper.PgcrMapper,
 ) *PgcrWriter {
 	return &PgcrWriter{
 		db:      db,

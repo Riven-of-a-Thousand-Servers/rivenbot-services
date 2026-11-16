@@ -33,10 +33,10 @@ type InMemoryCache struct {
 }
 
 // Creates an In-memory cache with an internal broker with buffer size specified
-func NewInMemoryCache(brokerSize int) *InMemoryCache {
+func NewInMemoryCache() *InMemoryCache {
 	return &InMemoryCache{
 		entries: make(map[string]manifest.Entry),
-		Broker:  pubsub.NewBroker[CacheEvent](brokerSize),
+		Broker:  pubsub.NewBroker[CacheEvent](),
 	}
 }
 
