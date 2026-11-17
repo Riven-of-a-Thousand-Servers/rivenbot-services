@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"database/sql"
-	"io"
 	"log/slog"
 	"os"
 	"slices"
@@ -24,12 +23,12 @@ var (
 
 type BackfillAppConfig struct {
 	WalkerRootDir string
+	ApiKey        string
 	noTui         bool
 }
 
 type BackfillApp struct {
 	tracker *telemetry.Tracker
-	sampler *telemetry.MetricsSampler
 	walker  *walker.FileWalker
 	files   *consumer.FileConsumer
 	cache   *cache.InMemoryCache
@@ -37,47 +36,41 @@ type BackfillApp struct {
 
 	cleanup []func() error
 
-	noTui      bool
-	deadLetter io.Writer
-	logs       io.Writer
+	noTui          bool
+	quarantineFile *os.File
+	logFile        *os.File
 }
 
-func NewBackfill(ctx context.Context, db *sql.DB, tracker *telemetry.Tracker, cfg BackfillAppConfig) (*BackfillApp, error) {
+func NewBackfill(db *sql.DB, tracker *telemetry.Tracker, cfg BackfillAppConfig) (*BackfillApp, error) {
+	var err error
+
 	fileWalker := walker.NewFileWalker(cfg.WalkerRootDir)
-	metricsSampler := telemetry.NewSampler(telemetry.Samples, samplerInterval)
 	cache := cache.NewInMemoryCache()
 	mapper := mapper.New(cache)
 
 	app := &BackfillApp{
 		walker:  fileWalker,
 		tracker: tracker,
-		sampler: metricsSampler,
 		cache:   cache,
 		mapper:  mapper,
 	}
 
-	logFile, err := os.OpenFile(logFileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return nil, err
-	}
-
-	deadLetterFile, err := os.OpenFile(deadLetterFileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	app.quarantineFile, err = os.Open(deadLetterFileName)
 	if err != nil {
 		return nil, err
 	}
 
 	app.cleanup = append(app.cleanup,
-		deadLetterFile.Close,
-		logFile.Close,
-		metricsSampler.Shutdown,
-		tracker.Close,
+		app.quarantineFile.Close,
+		app.tracker.Close,
 	)
 
 	return app, nil
 }
 
 // This will run the backfill job on just one file
-func (a *BackfillApp) RunOnce(ctx context.Context, file string) error {
+func (a *BackfillApp) RunOnce(ctx context.Context, file string, apiKey string) error {
+	// TODO: Implement the chainmorph run here
 	panic("Not implemented")
 }
 
@@ -87,4 +80,8 @@ func (a *BackfillApp) Clean() {
 			slog.Error("Error while cleaning up", "error", err)
 		}
 	}
+}
+
+func (a *BackfillApp) DeadLetter() *os.File {
+	return a.quarantineFile
 }

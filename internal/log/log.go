@@ -14,14 +14,13 @@ var (
 	initialized atomic.Bool
 )
 
-func Setup(mainLogger io.Writer, level slog.Level, ws ...io.Writer) {
+func Setup(logFile io.Writer, level slog.Level, ringBuf *telemetry.Ring[telemetry.LogEntry]) {
 	initOnce.Do(func() {
 		handlerOpts := &slog.HandlerOptions{
 			Level: level,
 		}
 
-		mainHandler := slog.NewTextHandler(mainLogger, handlerOpts)
-		ringBuf := telemetry.NewRing[telemetry.LogEntry](30)
+		mainHandler := slog.NewTextHandler(logFile, handlerOpts)
 		tuiHandler := NewTuiHandler(ringBuf, level)
 
 		slog.SetDefault(slog.New(slog.NewMultiHandler(mainHandler, tuiHandler)))
