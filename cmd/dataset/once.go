@@ -62,7 +62,7 @@ func newDatasetOnceCommand() *cobra.Command {
 			}
 
 			// TODO: Implement headless vs non-headless logic
-			return bApp.RunOnce(cmd.Context(), todo, opts.ApiKey)
+			return bApp.RunOnce(cmd.Context(), todo, opts.ApiKey, opts.DBUrl)
 		},
 	}
 

@@ -6,14 +6,14 @@ import (
 	"log/slog"
 	"sync/atomic"
 
-	"pgcr-processing-service/internal/consumer"
+	"pgcr-processing-service/internal/publisher"
 	"pgcr-processing-service/internal/telemetry"
 	"pgcr-processing-service/internal/types/bungie"
 )
 
 var MapCount atomic.Int32
 
-func MapRawPgcr[T ~[]byte](ctx context.Context, item telemetry.Job[consumer.Delivery[T]]) (telemetry.Job[bungie.PostGameCarnageReport], error) {
+func MapRawPgcr[T ~[]byte](ctx context.Context, item telemetry.Job[publisher.Delivery[T]]) (telemetry.Job[bungie.PostGameCarnageReport], error) {
 	MapCount.Add(1)
 	defer MapCount.Add(-1)
 

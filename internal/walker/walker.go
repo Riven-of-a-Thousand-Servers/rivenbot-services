@@ -11,8 +11,6 @@ import (
 	"pgcr-processing-service/internal/pubsub"
 )
 
-type FileIndex []FileEntry
-
 type FilterFunc func(fs.DirEntry) bool
 
 type FileWalker struct {
@@ -27,8 +25,6 @@ type FileWalker struct {
 type FileEntry struct {
 	Filename string
 	Path     string
-	Started  bool
-	Done     bool
 }
 
 type WalkerOption func(w *FileWalker)
@@ -64,7 +60,7 @@ func NewFileWalker(root string, opts ...WalkerOption) *FileWalker {
 
 // WalkAndAccumulate takes in a list of filters to be applied sequentially
 // if any of the directoryEntries fails one of the filters then it is skipped
-func (f *FileWalker) WalkAndAccumulate() (FileIndex, error) {
+func (f *FileWalker) WalkAndAccumulate() ([]FileEntry, error) {
 	var entries []FileEntry
 	if err := filepath.WalkDir(f.root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -98,8 +94,6 @@ func (f *FileWalker) WalkAndAccumulate() (FileIndex, error) {
 		entry := FileEntry{
 			Path:     path,
 			Filename: d.Name(),
-			Started:  false,
-			Done:     false,
 		}
 		entries = append(entries, entry)
 

@@ -7,4 +7,6 @@ func NewConfigCommand() *cobra.Command {
 		Use:   "config",
 		Short: "Configure RivenBot",
 	}
+
+	return cmd
 }

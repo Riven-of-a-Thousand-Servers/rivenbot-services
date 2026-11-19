@@ -1,4 +1,4 @@
-package consumer
+package publisher
 
 import (
 	"bufio"
@@ -6,10 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
-	"sync"
-	"time"
 
-	"pgcr-processing-service/internal/pubsub"
 	"pgcr-processing-service/internal/telemetry"
 	"pgcr-processing-service/internal/types/dataset"
 	"pgcr-processing-service/internal/walker"
@@ -20,8 +17,8 @@ import (
 const (
 	maxSize      = 1024 * 1024 * 20 // 20 MBs
 	linesPerFile = 10_000_000
-	queueName    = "File Consumer"
-	queueUnit    = "Lines per File"
+	gaugeName    = "File Consumer"
+	gaugeUnit    = "Lines per File"
 )
 
 type ConsumerOpts struct {
@@ -29,54 +26,59 @@ type ConsumerOpts struct {
 	NumLines int
 }
 
-type File struct {
-	Filename string
-	RowsDone int
-	Elapsed  time.Duration
-	Err      error
-}
+type PublisherOpt func(*ScanningPublisher)
 
-type FileConsumer struct {
-	*pubsub.Broker[File]
-	fileIndex walker.FileIndex
-	tracker   *telemetry.Tracker
+type ScanningPublisher struct {
+	tracker *telemetry.Tracker
 
-	once       sync.Once
-	ch         chan telemetry.Job[Delivery[dataset.RawContent]]
+	out        chan telemetry.Job[Delivery[dataset.RawContent]]
 	unregister func()
 	numFiles   int
 	numLines   int
 }
 
-func NewFileConsumer(idx walker.FileIndex,
-	tracker *telemetry.Tracker,
-	opts ConsumerOpts,
-) *FileConsumer {
-	c := &FileConsumer{
-		fileIndex: idx,
-		tracker:   tracker,
-		Broker:    pubsub.NewBroker[File](),
-		numFiles:  opts.NumFiles,
-		numLines:  opts.NumLines,
-		ch:        make(chan telemetry.Job[Delivery[dataset.RawContent]], 2048), // why 2048? Idk tbh
+func WithFileAmount(amt int) PublisherOpt {
+	return func(sp *ScanningPublisher) {
+		sp.numFiles = amt
 	}
-	c.unregister = c.tracker.RegisterGauge(queueName, queueUnit, func() (queueLength int, queueCap int) {
-		return len(c.ch), cap(c.ch)
+}
+
+func WithLineAmount(amt int) PublisherOpt {
+	return func(sp *ScanningPublisher) {
+		sp.numLines = amt
+	}
+}
+
+func NewScanningPublisher(
+	tracker *telemetry.Tracker,
+	opts ...PublisherOpt,
+) *ScanningPublisher {
+	c := &ScanningPublisher{
+		tracker: tracker,
+		out:     make(chan telemetry.Job[Delivery[dataset.RawContent]], 2048), // why 2048? Idk tbh
+	}
+
+	for _, opt := range opts {
+		opt(c)
+	}
+
+	c.unregister = c.tracker.RegisterGauge(gaugeName, gaugeUnit, func() (queueLength int, queueCap int) {
+		return len(c.out), cap(c.out)
 	})
 
 	return c
 }
 
-func (c *FileConsumer) Out() <-chan telemetry.Job[Delivery[dataset.RawContent]] {
-	return c.ch
+func (c *ScanningPublisher) Out() <-chan telemetry.Job[Delivery[dataset.RawContent]] {
+	return c.out
 }
 
-func (c *FileConsumer) Start(ctx context.Context) error {
+func (c *ScanningPublisher) Start(ctx context.Context, entries ...walker.FileEntry) error {
 	defer c.unregister()
-	defer close(c.ch)
+	defer close(c.out)
 
 	fileCount := 0
-	for _, entry := range c.fileIndex {
+	for _, entry := range entries {
 		if c.numFiles > 0 && fileCount >= c.numFiles {
 			break
 		}
@@ -95,12 +97,13 @@ func (c *FileConsumer) Start(ctx context.Context) error {
 			return err
 		}
 		task.SetFinished()
+		fileCount++
 	}
 
 	return nil
 }
 
-func (c *FileConsumer) prepareFile(ctx context.Context, entry walker.FileEntry, task *telemetry.Task) error {
+func (c *ScanningPublisher) prepareFile(ctx context.Context, entry walker.FileEntry, task *telemetry.Task) error {
 	slog.Info("Starting to setup file for consumption", "file", entry.Filename)
 	file, err := os.Open(entry.Path)
 	if err != nil {
@@ -133,7 +136,7 @@ func (c *FileConsumer) prepareFile(ctx context.Context, entry walker.FileEntry, 
 	return nil
 }
 
-func (c *FileConsumer) consumeLines(ctx context.Context, scanner *bufio.Scanner, task *telemetry.Task) error {
+func (c *ScanningPublisher) consumeLines(ctx context.Context, scanner *bufio.Scanner, task *telemetry.Task) error {
 	lineCount := 0
 
 ScanLoop:
@@ -149,7 +152,7 @@ ScanLoop:
 			job := CreateJob(scanner, lineCount, task)
 
 			select {
-			case c.ch <- job:
+			case c.out <- job:
 			case <-ctx.Done():
 				return ctx.Err()
 			}

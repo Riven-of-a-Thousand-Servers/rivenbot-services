@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"log/slog"
 
-	"pgcr-processing-service/internal/consumer"
 	"pgcr-processing-service/internal/producer"
+	"pgcr-processing-service/internal/publisher"
 	"pgcr-processing-service/internal/telemetry"
 
 	"github.com/rabbitmq/amqp091-go"
@@ -90,7 +90,7 @@ func (i *rabbitProducerCloser[T]) Produce(ctx context.Context, item T) error {
 
 // Instantiate a queue
 // The name parameter declares the name of the consumer
-func (r *RabbitMQ[T]) Consume(ctx context.Context) (<-chan telemetry.Job[consumer.Delivery[T]], error) {
+func (r *RabbitMQ[T]) Consume(ctx context.Context) (<-chan telemetry.Job[publisher.Delivery[T]], error) {
 	ch, err := r.Conn.Channel()
 	if err != nil {
 		slog.Error("Failed to open amqp channel for consumer", "error", err)
@@ -103,7 +103,7 @@ func (r *RabbitMQ[T]) Consume(ctx context.Context) (<-chan telemetry.Job[consume
 		return nil, err
 	}
 
-	out := make(chan telemetry.Job[consumer.Delivery[T]])
+	out := make(chan telemetry.Job[publisher.Delivery[T]])
 	go func() {
 		defer close(out)
 		defer ch.Close()
@@ -123,14 +123,14 @@ func (r *RabbitMQ[T]) Consume(ctx context.Context) (<-chan telemetry.Job[consume
 					continue
 				}
 
-				delivery := consumer.Delivery[T]{
+				delivery := publisher.Delivery[T]{
 					Payload: item,
 					Headers: d.Headers,
 					Ack:     func() error { return d.Ack(false) },
 					Nack:    func(requeue bool) error { return d.Nack(false, requeue) },
 				}
 				task := r.Tracker.AddTask("skibidi task", 1)
-				job := telemetry.Job[consumer.Delivery[T]]{
+				job := telemetry.Job[publisher.Delivery[T]]{
 					Task: task,
 					Todo: delivery,
 				}

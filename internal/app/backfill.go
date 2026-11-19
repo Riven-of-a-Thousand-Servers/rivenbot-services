@@ -3,16 +3,24 @@ package app
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"os"
 	"slices"
 	"time"
 
 	"pgcr-processing-service/internal/cache"
-	"pgcr-processing-service/internal/consumer"
+	"pgcr-processing-service/internal/db"
 	"pgcr-processing-service/internal/mapper"
+	"pgcr-processing-service/internal/pipeline"
+	"pgcr-processing-service/internal/publisher"
 	"pgcr-processing-service/internal/telemetry"
+	"pgcr-processing-service/internal/types/manifest"
 	"pgcr-processing-service/internal/walker"
+	"pgcr-processing-service/internal/writer"
+
+	"github.com/deahtstroke/chainmorph"
+	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -30,7 +38,6 @@ type BackfillAppConfig struct {
 type BackfillApp struct {
 	tracker *telemetry.Tracker
 	walker  *walker.FileWalker
-	files   *consumer.FileConsumer
 	cache   *cache.InMemoryCache
 	mapper  *mapper.PgcrMapper
 
@@ -68,10 +75,63 @@ func NewBackfill(db *sql.DB, tracker *telemetry.Tracker, cfg BackfillAppConfig) 
 	return app, nil
 }
 
-// This will run the backfill job on just one file
-func (a *BackfillApp) RunOnce(ctx context.Context, file string, apiKey string) error {
-	// TODO: Implement the chainmorph run here
-	panic("Not implemented")
+func (a *BackfillApp) RunOnce(ctx context.Context, file string, apiKey string, dbUrl string) error {
+	if dbUrl == "" {
+		return fmt.Errorf("Databse url is needed")
+	}
+
+	if apiKey == "" {
+		return fmt.Errorf("Api Key is needed as well")
+	}
+
+	conn, err := db.Connect(ctx, dbUrl)
+	if err != nil {
+		return err
+	}
+
+	queries, err := db.Prepare(ctx, conn)
+	if err != nil {
+		return err
+	}
+
+	var eg *errgroup.Group
+	eg, ctx = errgroup.WithContext(ctx)
+
+	files, err := a.walker.WalkAndAccumulate()
+	if err != nil {
+		return err
+	}
+
+	if err := a.cache.Init(ctx, apiKey, manifest.InventoryItemDefinition,
+		manifest.ActivityDefinition,
+		manifest.DestinationDefinition,
+		manifest.EquipmentSlotDefinition,
+		manifest.DamageTypeDefinition); err != nil {
+		return err
+	}
+
+	mapper := mapper.New(a.cache)
+
+	scanPublisher := publisher.NewScanningPublisher(a.tracker, publisher.WithFileAmount(1))
+	eg.Go(func() error {
+		return scanPublisher.Start(ctx, files...)
+	})
+
+	pgcrWriter := writer.NewPgcrWriter(conn, queries, mapper)
+
+	// Don't need a file index, just read one file
+	eg.Go(func() error {
+		return chainmorph.From(pipeline.NewChannelReader(scanPublisher.Out())).
+			MapFunc(pipeline.MapRawPgcr).
+			If(pipeline.FilterRaids).
+			WriteTo(ctx, pgcrWriter)
+	})
+
+	if err := eg.Wait(); err != nil {
+		return fmt.Errorf("Error while running command for file %s: %v", file, err)
+	}
+
+	return nil
 }
 
 func (a *BackfillApp) Clean() {
