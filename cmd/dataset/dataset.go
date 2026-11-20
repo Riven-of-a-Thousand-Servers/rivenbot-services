@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"runtime/debug"
 
+	"pgcr-processing-service/internal/app"
+
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 )
@@ -16,7 +18,7 @@ const (
 	EventChanSize = 20_000
 )
 
-func NewCommand() *cobra.Command {
+func NewCommand(app *app.BackfillApp) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:          "dataset",
 		Short:        "Process a Destiny 2 PGCR dataset",

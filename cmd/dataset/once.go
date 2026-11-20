@@ -23,7 +23,12 @@ type DatasetOnceOpts struct {
 	Headless bool
 }
 
-func newDatasetOnceCommand() *cobra.Command {
+// TODO: Big change that needs to happen here.
+// Most of the big structs that do the heavy lifting
+// like telemetry.Tracker and app.Backfill
+// are directly created in the command itself which
+// means I'm not able to test this command properly
+func newDatasetOnceCommand(a app.App) *cobra.Command {
 	var opts DatasetOnceOpts
 	cmd := &cobra.Command{
 		Use:               "once [OPTIONS] [FILE]",
