@@ -187,10 +187,10 @@ func NewCommand(app *app.BackfillApp) *cobra.Command {
 		// },
 	}
 
-	cmd.AddCommand(
-		newDatasetRunCommand(),
-		newDatasetOnceCommand(),
-	)
+	// cmd.AddCommand(
+	// 	newDatasetRunCommand(),
+	// 	newDatasetOnceCommand(),
+	// )
 
 	return cmd
 }

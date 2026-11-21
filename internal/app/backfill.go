@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"pgcr-processing-service/internal/cache"
+	"pgcr-processing-service/internal/config"
 	"pgcr-processing-service/internal/db"
 	"pgcr-processing-service/internal/mapper"
 	"pgcr-processing-service/internal/pipeline"
@@ -29,17 +30,12 @@ var (
 	deadLetterFileName = "deadletter.log"
 )
 
-type BackfillAppConfig struct {
-	WalkerRootDir string
-	ApiKey        string
-	noTui         bool
-}
-
 type BackfillApp struct {
 	tracker *telemetry.Tracker
 	walker  *walker.FileWalker
 	cache   *cache.InMemoryCache
 	mapper  *mapper.PgcrMapper
+	config  *config.Config
 
 	cleanup []func() error
 
@@ -48,19 +44,26 @@ type BackfillApp struct {
 	logFile        *os.File
 }
 
-func NewBackfill(db *sql.DB, tracker *telemetry.Tracker, cfg BackfillAppConfig) (*BackfillApp, error) {
+func NewBackfill(db *sql.DB, tracker *telemetry.Tracker) (*BackfillApp, error) {
 	var err error
 
-	fileWalker := walker.NewFileWalker(cfg.WalkerRootDir)
+	app := &BackfillApp{}
+	cfg, err := app.GetConfig()
+
 	cache := cache.NewInMemoryCache()
 	mapper := mapper.New(cache)
 
-	app := &BackfillApp{
-		walker:  fileWalker,
-		tracker: tracker,
-		cache:   cache,
-		mapper:  mapper,
+	fileWalker := walker.NewFileWalker(cfg.Backfill.WalkerOpts.RootDir)
+
+	if err != nil {
+		slog.Error("unable to fetch config for backfill application", "error", err)
+		return nil, err
 	}
+
+	app.tracker = tracker
+	app.cache = cache
+	app.mapper = mapper
+	app.walker = fileWalker
 
 	app.quarantineFile, err = os.Open(deadLetterFileName)
 	if err != nil {
@@ -75,15 +78,8 @@ func NewBackfill(db *sql.DB, tracker *telemetry.Tracker, cfg BackfillAppConfig) 
 	return app, nil
 }
 
-func (a *BackfillApp) RunOnce(ctx context.Context, file string, apiKey string, dbUrl string) error {
-	if dbUrl == "" {
-		return fmt.Errorf("Databse url is needed")
-	}
-
-	if apiKey == "" {
-		return fmt.Errorf("Api Key is needed as well")
-	}
-
+func (a *BackfillApp) RunOnce(ctx context.Context, file string) error {
+	dbUrl := a.config.Database.URL
 	conn, err := db.Connect(ctx, dbUrl)
 	if err != nil {
 		return err
@@ -100,6 +96,11 @@ func (a *BackfillApp) RunOnce(ctx context.Context, file string, apiKey string, d
 	files, err := a.walker.WalkAndAccumulate()
 	if err != nil {
 		return err
+	}
+
+	apiKey := a.config.Backfill.Processor.ApiKey
+	if apiKey == "" {
+		return fmt.Errorf("API key not set for the current config")
 	}
 
 	if err := a.cache.Init(ctx, apiKey, manifest.InventoryItemDefinition,
@@ -132,6 +133,26 @@ func (a *BackfillApp) RunOnce(ctx context.Context, file string, apiKey string, d
 	}
 
 	return nil
+}
+
+func (a *BackfillApp) GetConfig() (*config.Config, error) {
+	var err error
+	if a.config == nil {
+		a.config, err = config.Init()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return a.config, nil
+}
+
+func (a *BackfillApp) GetTracker() (*telemetry.Tracker, error) {
+	if a.tracker == nil {
+		return nil, fmt.Errorf("tracker instance not created yet for this backfill app")
+	}
+
+	return a.tracker, nil
 }
 
 func (a *BackfillApp) Clean() {

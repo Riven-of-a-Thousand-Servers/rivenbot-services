@@ -2,7 +2,6 @@ package config
 
 type BackfillConfig struct {
 	WalkerOpts FileWalkerConfig `json:"walker"`
-	Database   DatabaseConfig   `json:"db"`
 	Processor  ProcessorConfig  `json:"processor"`
 }
 
@@ -13,10 +12,7 @@ type FileWalkerConfig struct {
 	Files       int    `json:"files,omitempty"`
 }
 
-type DatabaseConfig struct {
-	URL string `json:"url,omitempty"`
-}
-
 type ProcessorConfig struct {
-	Workers int `json:"workers"`
+	Workers int    `json:"workers"`
+	ApiKey  string `json:"apiKey"`
 }
