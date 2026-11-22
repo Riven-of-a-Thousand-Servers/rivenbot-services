@@ -21,6 +21,7 @@ type Provider interface {
 }
 
 type Config struct {
+	Path     string
 	Database *DatabaseConfig `json:"db"`
 	Logging  *LoggingConfig  `json:"log"`
 	Backfill *BackfillConfig `json:"backfill"`
@@ -98,7 +99,7 @@ func Init() (*Config, error) {
 	var cfg Config
 
 	if existing, err := Find(); err != nil {
-		return &cfg, err
+		return nil, err
 	} else if existing != "" {
 		return decodeConfig(existing)
 	}
