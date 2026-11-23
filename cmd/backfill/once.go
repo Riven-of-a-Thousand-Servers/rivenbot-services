@@ -1,4 +1,4 @@
-package dataset
+package backfill
 
 import (
 	"io/fs"
@@ -22,12 +22,7 @@ type DatasetOnceOpts struct {
 	Headless bool
 }
 
-// TODO: Big change that needs to happen here.
-// Most of the big structs that do the heavy lifting
-// like telemetry.Tracker and app.Backfill
-// are directly created in the command itself which
-// means I'm not able to test this command properly
-func newDatasetOnceCommand(a app.App) *cobra.Command {
+func newOnceCommand(b app.Backfill) *cobra.Command {
 	var opts DatasetOnceOpts
 	cmd := &cobra.Command{
 		Use:               "once [OPTIONS] [FILE]",
@@ -46,7 +41,7 @@ func newDatasetOnceCommand(a app.App) *cobra.Command {
 			if !log.Initialized() {
 				log.Setup(logFile, slog.LevelInfo, ringBuf)
 			}
-			return a.RunOnce(cmd.Context(), file)
+			return b.RunOnce(cmd.Context(), file)
 		},
 	}
 

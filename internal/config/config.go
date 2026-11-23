@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 )
@@ -28,7 +27,7 @@ type Config struct {
 }
 
 type LoggingConfig struct {
-	FileName string
+	FileName string `json:"fileName"`
 }
 
 type DatabaseConfig struct {
@@ -98,10 +97,10 @@ func Find() (string, error) {
 func Init() (*Config, error) {
 	var cfg Config
 
-	if existing, err := Find(); err != nil {
+	if existing, err := Load(); err != nil {
 		return nil, err
-	} else if existing != "" {
-		return decodeConfig(existing)
+	} else if existing != nil {
+		return existing, nil
 	}
 
 	cfg.Defaults()
@@ -133,6 +132,16 @@ func Init() (*Config, error) {
 	return &cfg, nil
 }
 
+func Load() (*Config, error) {
+	if existing, err := Find(); err != nil {
+		return nil, err
+	} else if existing != "" {
+		return decodeConfig(existing)
+	}
+
+	return nil, nil
+}
+
 func decodeConfig(path string) (*Config, error) {
 	var cfg Config
 	r, err := os.Open(path)
@@ -142,29 +151,6 @@ func decodeConfig(path string) (*Config, error) {
 
 	if err := json.NewDecoder(r).Decode(&cfg); err != nil {
 		return &cfg, err
-	}
-
-	return &cfg, nil
-}
-
-// Loads the Config from the configured location
-// Default location is in cwd
-func Load() (*Config, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, err
-	}
-
-	path := filepath.Join(cwd, configDirName, configFileName)
-
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("unable to open config file at %s: %v", path, err)
-	}
-
-	var cfg Config
-	if err := json.NewDecoder(file).Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("unable to decode config: %v", err)
 	}
 
 	return &cfg, nil

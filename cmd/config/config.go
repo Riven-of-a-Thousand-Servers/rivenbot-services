@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewConfigCommand(a *app.App) *cobra.Command {
+func NewCommand(a app.App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
 		Short: "Manage configuration for RivenBot",
@@ -20,7 +20,7 @@ If no configuration is found then a new one with defaults will be
 initialized in the current working directory.`,
 	}
 
-	cmd.AddCommand()
+	cmd.AddCommand(newConfigInitCommand(a))
 
 	return cmd
 }

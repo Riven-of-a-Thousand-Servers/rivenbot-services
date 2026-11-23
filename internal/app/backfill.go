@@ -2,12 +2,12 @@ package app
 
 import (
 	"context"
-	"database/sql"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"slices"
-	"time"
 
 	"pgcr-processing-service/internal/cache"
 	"pgcr-processing-service/internal/config"
@@ -24,11 +24,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-var (
-	samplerInterval    = 200 * time.Millisecond
-	logFileName        = "dataset.log"
-	deadLetterFileName = "deadletter.log"
-)
+var deadLetterFileName = "deadletter.log"
 
 type BackfillApp struct {
 	tracker *telemetry.Tracker
@@ -44,21 +40,17 @@ type BackfillApp struct {
 	logFile        *os.File
 }
 
-func NewBackfill(db *sql.DB, tracker *telemetry.Tracker) (*BackfillApp, error) {
+var _ Backfill = (*BackfillApp)(nil)
+
+func NewBackfill(tracker *telemetry.Tracker) (*BackfillApp, error) {
 	var err error
 
 	app := &BackfillApp{}
-	cfg, err := app.GetConfig()
 
 	cache := cache.NewInMemoryCache()
 	mapper := mapper.New(cache)
 
 	fileWalker := walker.NewFileWalker(cfg.Backfill.WalkerOpts.RootDir)
-
-	if err != nil {
-		slog.Error("unable to fetch config for backfill application", "error", err)
-		return nil, err
-	}
 
 	app.tracker = tracker
 	app.cache = cache
@@ -84,11 +76,13 @@ func (a *BackfillApp) RunOnce(ctx context.Context, file string) error {
 	if err != nil {
 		return err
 	}
+	a.cleanup = append(a.cleanup, conn.Close)
 
 	queries, err := db.Prepare(ctx, conn)
 	if err != nil {
 		return err
 	}
+	a.cleanup = append(a.cleanup, queries.Close)
 
 	var eg *errgroup.Group
 	eg, ctx = errgroup.WithContext(ctx)
@@ -135,32 +129,27 @@ func (a *BackfillApp) RunOnce(ctx context.Context, file string) error {
 	return nil
 }
 
-func (a *BackfillApp) GetConfig() (*config.Config, error) {
-	var err error
-	if a.config == nil {
-		a.config, err = config.Init()
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return a.config, nil
+func (a *BackfillApp) Tracker() *telemetry.Tracker {
+	return a.tracker
 }
 
-func (a *BackfillApp) GetTracker() (*telemetry.Tracker, error) {
-	if a.tracker == nil {
-		return nil, fmt.Errorf("tracker instance not created yet for this backfill app")
-	}
-
-	return a.tracker, nil
+func (a *BackfillApp) Out() io.Writer {
+	return os.Stdout
 }
 
-func (a *BackfillApp) Clean() {
+func (a *BackfillApp) In() io.Reader {
+	return os.Stdin
+}
+
+func (a *BackfillApp) Close() error {
+	var errs []error
 	for _, c := range slices.Backward(a.cleanup) {
 		if err := c(); err != nil {
 			slog.Error("Error while cleaning up", "error", err)
+			errs = append(errs, err)
 		}
 	}
+	return errors.Join(errs...)
 }
 
 func (a *BackfillApp) DeadLetter() *os.File {

@@ -1,10 +1,11 @@
-package dataset
+package backfill
 
 import (
 	"context"
 	"log/slog"
 	"sync"
 
+	"pgcr-processing-service/internal/app"
 	"pgcr-processing-service/internal/pubsub"
 
 	tea "charm.land/bubbletea/v2"
@@ -22,7 +23,7 @@ type datasetRunOpts struct {
 	NumLines    int
 }
 
-func newDatasetRunCommand() *cobra.Command {
+func newRunCommand(b app.Backfill) *cobra.Command {
 	var opts datasetRunOpts
 
 	cmd := &cobra.Command{
