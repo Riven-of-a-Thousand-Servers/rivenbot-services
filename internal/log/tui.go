@@ -8,23 +8,30 @@ import (
 	"pgcr-processing-service/internal/telemetry"
 )
 
-type RingBufferHandler struct {
+type RingHandler struct {
 	level slog.Level
 	buf   *telemetry.Ring[telemetry.LogEntry]
 }
 
-func NewTuiHandler(buf *telemetry.Ring[telemetry.LogEntry], level slog.Level) *RingBufferHandler {
-	return &RingBufferHandler{
+func NewRingHandler(level slog.Level) *RingHandler {
+	return &RingHandler{
+		buf:   DefaultRing(),
+		level: level,
+	}
+}
+
+func NewRingHandlerWith(buf *telemetry.Ring[telemetry.LogEntry], level slog.Level) *RingHandler {
+	return &RingHandler{
 		level: level,
 		buf:   buf,
 	}
 }
 
-func (h *RingBufferHandler) Enabled(ctx context.Context, level slog.Level) bool {
+func (h *RingHandler) Enabled(ctx context.Context, level slog.Level) bool {
 	return level >= h.level
 }
 
-func (h *RingBufferHandler) Handle(ctx context.Context, record slog.Record) error {
+func (h *RingHandler) Handle(ctx context.Context, record slog.Record) error {
 	var attrs []string
 	record.Attrs(func(a slog.Attr) bool {
 		attrs = append(attrs, fmt.Sprintf("%s=%v", a.Key, a.Value))
@@ -40,11 +47,11 @@ func (h *RingBufferHandler) Handle(ctx context.Context, record slog.Record) erro
 	return nil
 }
 
-func (h *RingBufferHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+func (h *RingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	return h
 }
 
-func (h *RingBufferHandler) WithGroup(name string) slog.Handler {
+func (h *RingHandler) WithGroup(name string) slog.Handler {
 	if name == "" {
 		return h
 	}

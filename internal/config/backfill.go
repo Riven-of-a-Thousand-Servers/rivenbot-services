@@ -1,6 +1,7 @@
 package config
 
 type BackfillConfig struct {
+	TuiEnabled bool             `json:"tui"`
 	WalkerOpts FileWalkerConfig `json:"walker"`
 	Processor  ProcessorConfig  `json:"processor"`
 }

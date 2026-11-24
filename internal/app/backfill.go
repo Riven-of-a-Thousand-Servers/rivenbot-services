@@ -31,7 +31,6 @@ type BackfillApp struct {
 	walker  *walker.FileWalker
 	cache   *cache.InMemoryCache
 	mapper  *mapper.PgcrMapper
-	config  *config.Config
 
 	cleanup []func() error
 
@@ -42,7 +41,7 @@ type BackfillApp struct {
 
 var _ Backfill = (*BackfillApp)(nil)
 
-func NewBackfill(tracker *telemetry.Tracker) (*BackfillApp, error) {
+func NewBackfill(cfg *config.Config) (*BackfillApp, error) {
 	var err error
 
 	app := &BackfillApp{}
@@ -50,9 +49,9 @@ func NewBackfill(tracker *telemetry.Tracker) (*BackfillApp, error) {
 	cache := cache.NewInMemoryCache()
 	mapper := mapper.New(cache)
 
-	fileWalker := walker.NewFileWalker(cfg.Backfill.WalkerOpts.RootDir)
+	fileWalker := walker.NewFileWalker("")
+	// tracker := telemetry.NewTracker()
 
-	app.tracker = tracker
 	app.cache = cache
 	app.mapper = mapper
 	app.walker = fileWalker
@@ -71,7 +70,7 @@ func NewBackfill(tracker *telemetry.Tracker) (*BackfillApp, error) {
 }
 
 func (a *BackfillApp) RunOnce(ctx context.Context, file string) error {
-	dbUrl := a.config.Database.URL
+	dbUrl := ""
 	conn, err := db.Connect(ctx, dbUrl)
 	if err != nil {
 		return err
@@ -92,7 +91,7 @@ func (a *BackfillApp) RunOnce(ctx context.Context, file string) error {
 		return err
 	}
 
-	apiKey := a.config.Backfill.Processor.ApiKey
+	apiKey := ""
 	if apiKey == "" {
 		return fmt.Errorf("API key not set for the current config")
 	}

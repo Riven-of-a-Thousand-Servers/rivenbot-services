@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"log/slog"
 	"slices"
@@ -32,8 +33,8 @@ type Tracker struct {
 }
 
 type Summary struct {
-	AppStats AppStats
-	Runtime  RuntimeStats
+	App     AppStats
+	Runtime RuntimeStats
 }
 
 type AppStats struct {
@@ -60,8 +61,12 @@ type Job[T any] struct {
 	Task *Task
 }
 
-func NewTracker(ctx context.Context, buf *Ring[LogEntry], totalFiles int) (*Tracker, error) {
-	var err error
+// WARN: Definitely the wrong move to couple struct creation
+// with lifecycle, current build is broken but I want to fix
+// this ASAP since tracker does a lot of things when being
+// built. This needs to be separated back to creation + start
+func NewTracker(buf *Ring[LogEntry], totalFiles int) (*Tracker, error) {
+	// var err error
 
 	t := &Tracker{
 		logBuf:     buf,
@@ -69,35 +74,36 @@ func NewTracker(ctx context.Context, buf *Ring[LogEntry], totalFiles int) (*Trac
 		startedAt:  time.Now(),
 	}
 
-	sampler := NewSampler(Samples, 500*time.Millisecond)
-	sampler.Start(ctx)
-	t.cleanup = append(t.cleanup, sampler.Close)
-
-	buckets := []time.Duration{
-		1 * time.Microsecond,
-		10 * time.Microsecond,
-		100 * time.Microsecond,
-		1 * time.Millisecond,
-		10 * time.Millisecond,
-	}
-
-	histSub, unsub1 := sampler.Subscribe()
-	t.gcCyclesHistogram = NewHistogram(ctx, histSub, SchedulerLatencies, buckets...)
-	t.cleanup = append(t.cleanup,
-		t.gcCyclesHistogram.Close,
-		wrap(unsub1),
-	)
-
-	timeSub, unsub2 := sampler.Subscribe()
-	t.heapTimeseries, err = NewTimeseries[uint64](ctx, MemoryHeapUsed, timeSub, 1*time.Second)
-	if err != nil {
-		slog.Error("failed to create telemetry tracker", "error", err)
-		return nil, err
-	}
-	t.cleanup = append(t.cleanup,
-		t.heapTimeseries.Close,
-		wrap(unsub2),
-	)
+	// sampler := NewSampler(Samples, 500*time.Millisecond)
+	// sampler.Start(ctx)
+	// t.cleanup = append(t.cleanup, sampler.Close)
+	//
+	// buckets := []time.Duration{
+	// 	1 * time.Microsecond,
+	// 	10 * time.Microsecond,
+	// 	100 * time.Microsecond,
+	// 	1 * time.Millisecond,
+	// 	10 * time.Millisecond,
+	// }
+	//
+	// histSub, unsub1 := sampler.Subscribe()
+	// // WARN: Same goes for these two guys that initialize on creation
+	// t.gcCyclesHistogram = NewHistogram(ctx, histSub, SchedulerLatencies, buckets...)
+	// t.cleanup = append(t.cleanup,
+	// 	t.gcCyclesHistogram.Close,
+	// 	wrap(unsub1),
+	// )
+	//
+	// timeSub, unsub2 := sampler.Subscribe()
+	// t.heapTimeseries, err = NewTimeseries[uint64](ctx, MemoryHeapUsed, timeSub, 1*time.Second)
+	// if err != nil {
+	// 	slog.Error("failed to create telemetry tracker", "error", err)
+	// 	return nil, err
+	// }
+	// t.cleanup = append(t.cleanup,
+	// 	t.heapTimeseries.Close,
+	// 	wrap(unsub2),
+	// )
 
 	return t, nil
 }
@@ -161,7 +167,7 @@ func (t *Tracker) SnapshotSummary() Summary {
 			SchedLatencies: t.gcCyclesHistogram.SampleLatest(),
 			HeapUsedBytes:  t.heapTimeseries.Last(20), // TODO: Need to dynamically adjust this
 		},
-		AppStats: AppStats{
+		App: AppStats{
 			Elapsed:        elapsed,
 			ReadThroughput: readThroughput,
 			FilesDone:      filesDone,

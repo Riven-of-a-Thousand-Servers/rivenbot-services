@@ -2,14 +2,12 @@ package backfill
 
 import (
 	"io/fs"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"pgcr-processing-service/internal/app"
 	"pgcr-processing-service/internal/log"
-	"pgcr-processing-service/internal/telemetry"
 
 	"github.com/spf13/cobra"
 )
@@ -32,14 +30,13 @@ func newOnceCommand(b app.Backfill) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			file := args[0]
 
-			ringBuf := telemetry.NewRing[telemetry.LogEntry](120)
 			logFile, err := os.Open(logFileName)
 			if err != nil {
 				return err
 			}
 
 			if !log.Initialized() {
-				log.Setup(logFile, slog.LevelInfo, ringBuf)
+				log.Setup(logFile)
 			}
 			return b.RunOnce(cmd.Context(), file)
 		},

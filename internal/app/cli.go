@@ -35,14 +35,14 @@ func (c *Cli) Initialize() error {
 
 	c.cfg = cfg
 
-	f, err := os.OpenFile(cfg.Logging.FileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	logFile, err := os.OpenFile(cfg.Logging.FileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return err
 	}
 
-	c.closers = append(c.closers, f.Close)
+	c.closers = append(c.closers, logFile.Close)
 	if !log.Initialized() {
-		log.Setup(f, slog.LevelInfo, nil)
+		log.Setup(logFile)
 	}
 
 	return nil

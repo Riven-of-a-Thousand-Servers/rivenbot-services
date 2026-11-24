@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"pgcr-processing-service/cmd/backfill"
+	// "pgcr-processing-service/cmd/backfill"
 	"pgcr-processing-service/cmd/config"
 	"pgcr-processing-service/internal/app"
 
@@ -22,7 +22,7 @@ func NewRootCommand(cli *app.Cli) *cobra.Command {
 	}
 
 	// Backfill command needs a new backfill app
-	cmd.AddCommand(backfill.NewCommand())
+	// cmd.AddCommand(backfill.NewCommand())
 	cmd.AddCommand(config.NewCommand(cli))
 
 	return cmd

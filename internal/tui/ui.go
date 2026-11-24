@@ -127,12 +127,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) View() tea.View {
 	headerSection := strings.Join([]string{
-		headerItem("Files", fmt.Sprintf("%d/%d", m.summary.AppStats.FilesDone, m.summary.AppStats.FilesTotal)),
-		headerItem("Elapsed", m.summary.AppStats.Elapsed.Round(time.Second).String()),
-		headerItem("Read Throughput", formatNumber(m.summary.AppStats.ReadThroughput)+"ln/s"),
-		headerItem("Inserted", formatNumber(float64(m.summary.AppStats.LinesInserted))),
-		headerItem("Skipped", formatNumber(float64(m.summary.AppStats.LinesSkipped))),
-		headerItem("Errored", formatNumber(float64(m.summary.AppStats.LinesErrored))),
+		headerItem("Files", fmt.Sprintf("%d/%d", m.summary.App.FilesDone, m.summary.App.FilesTotal)),
+		headerItem("Elapsed", m.summary.App.Elapsed.Round(time.Second).String()),
+		headerItem("Read Throughput", formatNumber(m.summary.App.ReadThroughput)+"ln/s"),
+		headerItem("Inserted", formatNumber(float64(m.summary.App.LinesInserted))),
+		headerItem("Skipped", formatNumber(float64(m.summary.App.LinesSkipped))),
+		headerItem("Errored", formatNumber(float64(m.summary.App.LinesErrored))),
 	}, headerSeparator)
 
 	headerSection = lipgloss.NewStyle().
