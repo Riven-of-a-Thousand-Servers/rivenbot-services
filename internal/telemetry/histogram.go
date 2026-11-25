@@ -2,7 +2,9 @@ package telemetry
 
 import (
 	"context"
+	"log/slog"
 	"runtime/metrics"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -15,15 +17,13 @@ type Histogram struct {
 	// timeRanges are the buckets in which the histogram will
 	// try to aggregate points for the specified runtime metric
 	timeRanges []time.Duration
-
-	// metric to sample for
-	metric RuntimeMetric
+	metric     RuntimeMetric
 
 	latest    atomic.Pointer[[]Bucket]
 	samplerCh <-chan pubsub.Event[[]metrics.Sample]
 
-	cancel context.CancelFunc
-	done   chan struct{}
+	closeOnce sync.Once
+	done      chan struct{}
 }
 
 type Bucket struct {
@@ -33,28 +33,17 @@ type Bucket struct {
 }
 
 func NewHistogram(
-	ctx context.Context,
-	metricsChan <-chan pubsub.Event[[]metrics.Sample],
 	metric RuntimeMetric,
+	metricsChan <-chan pubsub.Event[[]metrics.Sample],
 	ranges ...time.Duration,
 ) *Histogram {
-	newCtx, cancel := context.WithCancel(ctx)
-
 	h := &Histogram{
 		timeRanges: ranges,
 		samplerCh:  metricsChan,
 		done:       make(chan struct{}),
-		cancel:     cancel,
 	}
 
-	go func() {
-		defer close(h.done)
-		h.startSampling(newCtx)
-	}()
-
-	// Empty slice so no nil pointer
 	h.latest.Store(&[]Bucket{})
-
 	return h
 }
 
@@ -62,15 +51,21 @@ func NewHistogram(
 // It runs every interval and stores the result in latest
 // Additionally, stores the previous sample in a function
 // variable caled prev
-func (h *Histogram) startSampling(ctx context.Context) {
+func (h *Histogram) Run(ctx context.Context) error {
 	var prev []uint64
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			slog.Debug("Histogram context was cancelled", "error", ctx.Err())
+			return ctx.Err()
 		// Each tick we sample and save the latest entry to the atomic.Pointer entry
 		// in the Histogram
-		case metrics := <-h.samplerCh:
+		case metrics, ok := <-h.samplerCh:
+			if !ok {
+				slog.Debug("sampler channel was suddenly closed")
+				return nil
+			}
+
 			hist := metrics.Payload[0].Value.Float64Histogram()
 			delta := make([]uint64, len(hist.Counts))
 			if prev != nil {
@@ -102,12 +97,13 @@ func (h *Histogram) startSampling(ctx context.Context) {
 
 			h.latest.Store(&buckets)
 		case <-h.done:
-			return
+			slog.Debug("received done message for histogram")
+			return nil
 		}
 	}
 }
 
-func (h *Histogram) SampleLatest() []Bucket {
+func (h *Histogram) getSample() []Bucket {
 	if res := h.latest.Load(); res != nil {
 		return *res
 	}
@@ -133,6 +129,6 @@ func (h *Histogram) GetRanges() []string {
 }
 
 func (h *Histogram) Close() error {
-	close(h.done)
+	h.closeOnce.Do(func() { close(h.done) })
 	return nil
 }

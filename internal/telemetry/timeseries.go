@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"runtime/metrics"
 	"slices"
@@ -25,15 +26,14 @@ type Timeseries[T MetricType] struct {
 	max, min        T
 	hasData         bool
 
-	mu     sync.RWMutex
-	cancel context.CancelFunc
+	mu sync.RWMutex
 
-	done    chan struct{}
-	samples <-chan pubsub.Event[[]metrics.Sample]
+	done      chan struct{}
+	closeOnce sync.Once
+	samples   <-chan pubsub.Event[[]metrics.Sample]
 }
 
 func NewTimeseries[T MetricType](
-	ctx context.Context,
 	metric RuntimeMetric,
 	samples <-chan pubsub.Event[[]metrics.Sample],
 	refresh time.Duration,
@@ -46,21 +46,12 @@ func NewTimeseries[T MetricType](
 		return nil, err
 	}
 
-	newCtx, cancel := context.WithCancel(ctx)
-
 	t := &Timeseries[T]{
 		metric:          metric,
 		buf:             NewRing[T](ringBufferSize),
 		samples:         samples,
-		cancel:          cancel,
 		refreshInterval: refresh,
-		done:            make(chan struct{}),
 	}
-
-	go func() {
-		defer close(t.done)
-		t.startSampling(newCtx)
-	}()
 
 	return t, nil
 }
@@ -89,7 +80,7 @@ func validateKind[T any](metric RuntimeMetric) error {
 	return fmt.Errorf("unknown runtime metrics %q", metric)
 }
 
-func (t *Timeseries[T]) startSampling(ctx context.Context) {
+func (t *Timeseries[T]) Run(ctx context.Context) error {
 	timer := time.NewTicker(t.refreshInterval)
 	defer timer.Stop()
 
@@ -101,16 +92,24 @@ func (t *Timeseries[T]) startSampling(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			slog.Debug("timeseries was cancelled", "error", ctx.Err())
+			return ctx.Err()
+		case <-t.done:
+			{
+				slog.Debug("received done message for timeseries")
+				return nil
+			}
 		case event, ok := <-t.samples:
 			if !ok {
+				slog.Debug("timeseries sampler channel was suddenly closed, pushing pending sample")
 				if pending {
 					t.pushSample(latest)
 				}
-				return
+				return nil
 			}
 			latest, pending = event, true
 		case <-timer.C:
+			slog.Debug("pushing latest data to buffer", "latest", latest)
 			if pending {
 				t.pushSample(latest)
 				pending = false
@@ -169,7 +168,6 @@ func (t *Timeseries[T]) MinMax() (T, T, bool) {
 }
 
 func (t *Timeseries[T]) Close() error {
-	t.cancel()
-	<-t.done
+	t.closeOnce.Do(func() { close(t.done) })
 	return nil
 }

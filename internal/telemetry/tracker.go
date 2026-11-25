@@ -1,9 +1,8 @@
 package telemetry
 
 import (
-	"context"
-	"database/sql"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
 	"sync"
@@ -24,8 +23,11 @@ type Tracker struct {
 	gcCyclesHistogram *Histogram
 	heapTimeseries    *Timeseries[uint64]
 
-	cleanup   []func() error
+	cleanup   []any
 	closeOnce sync.Once
+
+	// Wait group for all running histograms and timeseries
+	wg sync.WaitGroup
 
 	startedAt time.Time
 	gauges    []Gauge
@@ -61,12 +63,8 @@ type Job[T any] struct {
 	Task *Task
 }
 
-// WARN: Definitely the wrong move to couple struct creation
-// with lifecycle, current build is broken but I want to fix
-// this ASAP since tracker does a lot of things when being
-// built. This needs to be separated back to creation + start
 func NewTracker(buf *Ring[LogEntry], totalFiles int) (*Tracker, error) {
-	// var err error
+	var err error
 
 	t := &Tracker{
 		logBuf:     buf,
@@ -74,36 +72,35 @@ func NewTracker(buf *Ring[LogEntry], totalFiles int) (*Tracker, error) {
 		startedAt:  time.Now(),
 	}
 
-	// sampler := NewSampler(Samples, 500*time.Millisecond)
-	// sampler.Start(ctx)
-	// t.cleanup = append(t.cleanup, sampler.Close)
-	//
-	// buckets := []time.Duration{
-	// 	1 * time.Microsecond,
-	// 	10 * time.Microsecond,
-	// 	100 * time.Microsecond,
-	// 	1 * time.Millisecond,
-	// 	10 * time.Millisecond,
-	// }
-	//
-	// histSub, unsub1 := sampler.Subscribe()
-	// // WARN: Same goes for these two guys that initialize on creation
-	// t.gcCyclesHistogram = NewHistogram(ctx, histSub, SchedulerLatencies, buckets...)
-	// t.cleanup = append(t.cleanup,
-	// 	t.gcCyclesHistogram.Close,
-	// 	wrap(unsub1),
-	// )
-	//
-	// timeSub, unsub2 := sampler.Subscribe()
-	// t.heapTimeseries, err = NewTimeseries[uint64](ctx, MemoryHeapUsed, timeSub, 1*time.Second)
-	// if err != nil {
-	// 	slog.Error("failed to create telemetry tracker", "error", err)
-	// 	return nil, err
-	// }
-	// t.cleanup = append(t.cleanup,
-	// 	t.heapTimeseries.Close,
-	// 	wrap(unsub2),
-	// )
+	sampler := NewSampler(Samples, 500*time.Millisecond)
+	if err := t.AddToCleanup(sampler.Close); err != nil {
+		return nil, err
+	}
+
+	buckets := []time.Duration{
+		1 * time.Microsecond,
+		10 * time.Microsecond,
+		100 * time.Microsecond,
+		1 * time.Millisecond,
+		10 * time.Millisecond,
+	}
+
+	histSub, histUnsub := sampler.Subscribe()
+	t.gcCyclesHistogram = NewHistogram(SchedulerLatencies, histSub, buckets...)
+	if err := t.AddToCleanup(t.gcCyclesHistogram.Close, histUnsub); err != nil {
+		return nil, err
+	}
+
+	timeSub, timeUnsub := sampler.Subscribe()
+	t.heapTimeseries, err = NewTimeseries[uint64](MemoryHeapUsed, timeSub, 1*time.Second)
+	if err != nil {
+		slog.Error("failed to create telemetry tracker", "error", err)
+		return nil, err
+	}
+
+	if err := t.AddToCleanup(t.heapTimeseries.Close, timeUnsub); err != nil {
+		return nil, err
+	}
 
 	return t, nil
 }
@@ -164,7 +161,7 @@ func (t *Tracker) SnapshotSummary() Summary {
 
 	return Summary{
 		Runtime: RuntimeStats{
-			SchedLatencies: t.gcCyclesHistogram.SampleLatest(),
+			SchedLatencies: t.gcCyclesHistogram.getSample(),
 			HeapUsedBytes:  t.heapTimeseries.Last(20), // TODO: Need to dynamically adjust this
 		},
 		App: AppStats{
@@ -227,7 +224,7 @@ func (t *Tracker) Close() error {
 	t.closeOnce.Do(func() {
 		var errs []error
 		for _, c := range slices.Backward(t.cleanup) {
-			if err := c(); err != nil {
+			if err := cleanupRunAny(c); err != nil {
 				errs = append(errs, err)
 			}
 		}
@@ -236,6 +233,33 @@ func (t *Tracker) Close() error {
 	})
 
 	return err
+}
+
+func cleanupRunAny(a any) error {
+	switch f := a.(type) {
+	case func() error:
+		return f()
+	case func():
+		f()
+		return nil
+	default:
+		return fmt.Errorf("unsupported type: %T", f)
+	}
+}
+
+func (t *Tracker) AddToCleanup(closers ...any) error {
+	for _, c := range closers {
+		switch f := c.(type) {
+		case func() error:
+			t.cleanup = append(t.cleanup, f)
+		case func():
+			t.cleanup = append(t.cleanup, f)
+		default:
+			return fmt.Errorf("unsupported type: %T", f)
+		}
+	}
+
+	return nil
 }
 
 func wrap(f func()) func() error {

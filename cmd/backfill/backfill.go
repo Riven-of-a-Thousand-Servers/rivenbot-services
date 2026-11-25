@@ -26,10 +26,10 @@ func NewCommand(a app.App) *cobra.Command {
 		SilenceUsage: true,
 	}
 
-	cmd.AddCommand(
-		newRunCommand(),
-		newOnceCommand())
-
+	// cmd.AddCommand(
+	// 	newRunCommand(),
+	// 	newOnceCommand())
+	//
 	return cmd
 }
 

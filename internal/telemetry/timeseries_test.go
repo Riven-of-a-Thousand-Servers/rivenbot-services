@@ -97,9 +97,6 @@ func Test_Timeseries_InvalidInterval(t *testing.T) {
 
 	for testName, interval := range tests {
 		t.Run(testName, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-
 			samples := []metrics.Sample{
 				{Name: MemoryHeapUsed.String()},
 			}
@@ -107,7 +104,7 @@ func Test_Timeseries_InvalidInterval(t *testing.T) {
 			sampler := newMockSampler(samples, WithInterval(1*time.Second))
 			ch := sampler.publishSamples(0)
 
-			_, err := NewTimeseries[uint64](ctx, MemoryHeapUsed, ch, interval)
+			_, err := NewTimeseries[uint64](MemoryHeapUsed, ch, interval)
 			if err == nil {
 				t.Fatalf("expecting error, got none")
 			}
@@ -116,46 +113,45 @@ func Test_Timeseries_InvalidInterval(t *testing.T) {
 }
 
 func Test_Timeseries_InvalidKind(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
 	samples := []metrics.Sample{
 		{Name: MemoryHeapUsed.String()},
 	}
 	sampler := newMockSampler(samples, WithInterval(500*time.Millisecond))
 	ch := sampler.publishSamples(1)
-	_, err := NewTimeseries[float64](ctx, DoesntExist, ch, 200*time.Millisecond)
+	_, err := NewTimeseries[float64](DoesntExist, ch, 200*time.Millisecond)
 	if err == nil {
 		t.Fatal("expecting error, got none")
 	}
 }
 
 func Test_Timeseries_InvalidHistogram(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
 	samples := []metrics.Sample{
 		{Name: MemoryHeapUsed.String()},
 	}
+
 	sampler := newMockSampler(samples, WithInterval(500*time.Millisecond))
 	ch := sampler.publishSamples(1)
-	_, err := NewTimeseries[float64](ctx, GarbageCollectionCycles, ch, 200*time.Millisecond)
+	_, err := NewTimeseries[float64](GarbageCollectionCycles, ch, 200*time.Millisecond)
 	if err == nil {
 		t.Fatal("expecting error, got none")
 	}
 }
 
 func Test_TimeseriesSampling(t *testing.T) {
-	ctx := context.Background()
 	samples := []metrics.Sample{
 		{Name: MemoryHeapUsed.String()},
 	}
 	sampler := newMockSampler(samples, WithInterval(500*time.Millisecond))
 
 	ch := sampler.publishSamples(5)
-	sut, err := NewTimeseries[uint64](ctx, MemoryHeapUsed, ch, 200*time.Millisecond)
-
+	sut, err := NewTimeseries[uint64](MemoryHeapUsed, ch, 200*time.Millisecond)
 	assert.NilError(t, err)
+
+	ctx := context.Background()
+
+	err = sut.Run(ctx)
+	assert.NilError(t, err)
+
 	<-sampler.done
 
 	poll.WaitOn(t, func(t poll.LogT) poll.Result {
@@ -169,17 +165,23 @@ func Test_TimeseriesSampling(t *testing.T) {
 }
 
 func Test_Timeseries_PushSampleWorksSuccessfully(t *testing.T) {
-	ctx := context.Background()
 	samples := []metrics.Sample{
 		{Name: MemoryHeapUsed.String()},
 	}
 
 	sampler := newMockSampler(samples, WithInterval(100*time.Millisecond))
 	ch := sampler.publishSamples(2)
-	sut, err := NewTimeseries[uint64](ctx, MemoryHeapUsed, ch, 50*time.Millisecond)
+
+	sut, err := NewTimeseries[uint64](MemoryHeapUsed, ch, 50*time.Millisecond)
+	assert.NilError(t, err)
+
+	ctx := context.Background()
+
+	err = sut.Run(ctx)
 	assert.NilError(t, err)
 
 	<-sampler.done
+
 	poll.WaitOn(t, func(t poll.LogT) poll.Result {
 		if sut.buf.Len() >= 2 {
 			return poll.Success()
