@@ -8,10 +8,12 @@ import (
 	"slices"
 	"sync"
 	"time"
+
+	"pgcr-processing-service/internal/log"
 )
 
 type Tracker struct {
-	logBuf     *Ring[LogEntry]
+	logBuf     *log.Ring[log.LogEntry]
 	mu         sync.RWMutex
 	nextId     int
 	totalFiles int32
@@ -72,11 +74,11 @@ type Job[T any] struct {
 	Task *Task
 }
 
-func NewTracker(buf *Ring[LogEntry], totalFiles int) (*Tracker, error) {
+func NewTracker(totalFiles int) (*Tracker, error) {
 	var err error
 
 	t := &Tracker{
-		logBuf:     buf,
+		logBuf:     log.DefaultRing(),
 		totalFiles: int32(totalFiles),
 		startedAt:  time.Now(),
 	}

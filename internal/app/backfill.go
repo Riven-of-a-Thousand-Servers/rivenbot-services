@@ -27,8 +27,8 @@ import (
 var deadLetterFileName = "deadletter.log"
 
 type BackfillApp struct {
+	config  *config.BackfillConfig
 	tracker *telemetry.Tracker
-	walker  *walker.FileWalker
 	cache   *cache.InMemoryCache
 	mapper  *mapper.PgcrMapper
 
@@ -41,7 +41,7 @@ type BackfillApp struct {
 
 var _ Backfill = (*BackfillApp)(nil)
 
-func NewBackfill(cfg *config.Config) (*BackfillApp, error) {
+func NewBackfill(cfg *config.BackfillConfig) (*BackfillApp, error) {
 	var err error
 
 	app := &BackfillApp{}
@@ -49,12 +49,9 @@ func NewBackfill(cfg *config.Config) (*BackfillApp, error) {
 	cache := cache.NewInMemoryCache()
 	mapper := mapper.New(cache)
 
-	fileWalker := walker.NewFileWalker("")
-	// tracker := telemetry.NewTracker()
-
 	app.cache = cache
 	app.mapper = mapper
-	app.walker = fileWalker
+	app.config = cfg
 
 	app.quarantineFile, err = os.Open(deadLetterFileName)
 	if err != nil {
@@ -86,12 +83,30 @@ func (a *BackfillApp) RunOnce(ctx context.Context, file string) error {
 	var eg *errgroup.Group
 	eg, ctx = errgroup.WithContext(ctx)
 
-	files, err := a.walker.WalkAndAccumulate()
+	dirFilters := []walker.FilterFunc{
+		walker.ExcludeHidden,
+		walker.ExcludeReserved,
+	}
+
+	files, err := walker.WalkAndAccumulate(
+		a.config.WalkerOpts.RootDir,
+		a.config.WalkerOpts.Filepattern,
+		dirFilters...,
+	)
 	if err != nil {
+		slog.Error("failed to walk and accumulate files", "error", err)
 		return err
 	}
 
-	apiKey := ""
+	tracker, err := telemetry.NewTracker(len(files))
+	if err != nil {
+		slog.Error("failed to create telemetry tracker", "error", err)
+		return err
+	}
+
+	a.tracker = tracker
+
+	apiKey := a.config.Processor.ApiKey
 	if apiKey == "" {
 		return fmt.Errorf("API key not set for the current config")
 	}

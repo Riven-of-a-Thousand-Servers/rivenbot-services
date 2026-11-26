@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"pgcr-processing-service/internal/log"
 	"pgcr-processing-service/internal/pubsub"
 )
 
@@ -21,7 +22,7 @@ type MetricType interface {
 
 type Timeseries[T MetricType] struct {
 	metric          RuntimeMetric
-	buf             *Ring[T]
+	buf             *log.Ring[T]
 	refreshInterval time.Duration
 	max, min        T
 	hasData         bool
@@ -48,7 +49,7 @@ func NewTimeseries[T MetricType](
 
 	t := &Timeseries[T]{
 		metric:          metric,
-		buf:             NewRing[T](ringBufferSize),
+		buf:             log.NewRing[T](ringBufferSize),
 		samples:         samples,
 		refreshInterval: refresh,
 	}

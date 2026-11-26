@@ -5,16 +5,14 @@ import (
 	"log/slog"
 	"sync"
 	"sync/atomic"
-
-	"pgcr-processing-service/internal/telemetry"
 )
 
 func init() {
-	defaultRing.Store(telemetry.NewRing[telemetry.LogEntry](50))
+	defaultRing.Store(NewRing[LogEntry](50))
 }
 
 var (
-	defaultRing atomic.Pointer[telemetry.Ring[telemetry.LogEntry]]
+	defaultRing atomic.Pointer[Ring[LogEntry]]
 	initOnce    sync.Once
 	initialized atomic.Bool
 )
@@ -29,11 +27,11 @@ func Setup(logFile io.Writer) {
 	})
 }
 
-func DefaultRing() *telemetry.Ring[telemetry.LogEntry] {
+func DefaultRing() *Ring[LogEntry] {
 	return defaultRing.Load()
 }
 
-func SetDefaultRing(ring *telemetry.Ring[telemetry.LogEntry]) {
+func SetDefaultRing(ring *Ring[LogEntry]) {
 	defaultRing.Swap(ring)
 }
 

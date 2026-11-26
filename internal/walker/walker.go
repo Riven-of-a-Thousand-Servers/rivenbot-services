@@ -1,68 +1,27 @@
 package walker
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
-
-	"pgcr-processing-service/internal/pubsub"
 )
 
 type FilterFunc func(fs.DirEntry) bool
-
-type FileWalker struct {
-	*pubsub.Broker[FileEntry]
-
-	root          string
-	dirs          []FilterFunc
-	files         []FilterFunc
-	eventsEnabled bool
-}
 
 type FileEntry struct {
 	Filename string
 	Path     string
 }
 
-type WalkerOption func(w *FileWalker)
-
-func WithDirFilter(fn FilterFunc) WalkerOption {
-	return func(w *FileWalker) {
-		w.dirs = append(w.dirs, fn)
-	}
-}
-
-func WithFileFilter(fn FilterFunc) WalkerOption {
-	return func(w *FileWalker) {
-		w.files = append(w.files, fn)
-	}
-}
-
-var WithEventsEnabled WalkerOption = func(w *FileWalker) {
-	w.eventsEnabled = true
-}
-
-func NewFileWalker(root string, opts ...WalkerOption) *FileWalker {
-	w := &FileWalker{root: root}
-	for _, opt := range opts {
-		opt(w)
-	}
-
-	if w.eventsEnabled {
-		w.Broker = pubsub.NewBroker[FileEntry]()
-	}
-
-	return w
-}
-
 // WalkAndAccumulate takes in a list of filters to be applied sequentially
 // if any of the directoryEntries fails one of the filters then it is skipped
-func (f *FileWalker) WalkAndAccumulate() ([]FileEntry, error) {
+func WalkAndAccumulate(root string, globPattern string, dirFilters ...FilterFunc) ([]FileEntry, error) {
 	var entries []FileEntry
-	if err := filepath.WalkDir(f.root, func(path string, d fs.DirEntry, err error) error {
+	if err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if os.IsPermission(err) {
 				return filepath.SkipDir
@@ -70,36 +29,34 @@ func (f *FileWalker) WalkAndAccumulate() ([]FileEntry, error) {
 			return err
 		}
 
-		// Apply only directory filters first
 		if d.IsDir() {
-			if path == f.root {
+			if path == root {
 				return nil
 			}
 
-			for _, filter := range f.dirs {
+			for _, filter := range dirFilters {
 				if !filter(d) {
 					return filepath.SkipDir
 				}
 			}
+
 			return nil
 		}
 
-		// Apply file-level filters
-		for _, filter := range f.files {
-			if !filter(d) {
-				return nil
-			}
+		if globPattern == "" {
+			globPattern = "*"
 		}
 
-		entry := FileEntry{
+		if matched, err := filepath.Match(globPattern, d.Name()); err != nil {
+			return fmt.Errorf("malformed glob pattern: %v", err)
+		} else if !matched {
+			return nil
+		}
+
+		entries = append(entries, FileEntry{
 			Path:     path,
 			Filename: d.Name(),
-		}
-		entries = append(entries, entry)
-
-		if f.Broker != nil {
-			f.Broker.Publish(pubsub.WalkerProgress, entry)
-		}
+		})
 
 		return nil
 	}); err != nil {
@@ -107,7 +64,9 @@ func (f *FileWalker) WalkAndAccumulate() ([]FileEntry, error) {
 	}
 
 	slices.SortFunc(entries, func(a FileEntry, b FileEntry) int {
-		return strings.Compare(a.Filename, b.Filename)
+		aName, _, _ := strings.Cut(a.Filename, "-")
+		bName, _, _ := strings.Cut(b.Filename, "-")
+		return strings.Compare(aName, bName)
 	})
 
 	return entries, nil

@@ -9,14 +9,14 @@ import (
 func Test_WalkAndAccumulate(t *testing.T) {
 	tests := map[string]struct {
 		dirs     []FilterFunc
-		files    []FilterFunc
+		glob     string
 		expected int
 	}{
 		"Should filter by extension": {
-			files:    []FilterFunc{WithExtension("zst")},
+			glob:     "*.zst",
 			expected: 8,
 		},
-		"Should filter hidden": {
+		"Should filter hidden directories": {
 			dirs:     []FilterFunc{ExcludeHidden},
 			expected: 7,
 		},
@@ -30,29 +30,19 @@ func Test_WalkAndAccumulate(t *testing.T) {
 		},
 		"Should show only visible zst files": {
 			dirs:     []FilterFunc{ExcludeHidden, ExcludeReserved},
-			files:    []FilterFunc{WithExtension("zst")},
+			glob:     "*.zst",
 			expected: 4,
 		},
-		"Should filter by regex pattern": {
-			files:    []FilterFunc{WithPattern(`^example\.+`)},
-			expected: 5,
+		"Should filter by glob pattern": {
+			glob:     `example[0-9].*`,
+			expected: 4,
 		},
 	}
 
 	for test, tt := range tests {
 		t.Run(test, func(t *testing.T) {
 			root := "./testdata/"
-			var opts []WalkerOption
-			for _, dirFn := range tt.dirs {
-				opts = append(opts, WithDirFilter(dirFn))
-			}
-
-			for _, fileFn := range tt.files {
-				opts = append(opts, WithFileFilter(fileFn))
-			}
-
-			sut := NewFileWalker(root, opts...)
-			idx, err := sut.WalkAndAccumulate()
+			idx, err := WalkAndAccumulate(root, tt.glob, tt.dirs...)
 			if err != nil {
 				t.Fatalf("Not expecting error, got %v", err)
 			}

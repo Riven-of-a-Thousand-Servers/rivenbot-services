@@ -4,13 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-
-	"pgcr-processing-service/internal/telemetry"
 )
 
 type RingHandler struct {
 	level slog.Level
-	buf   *telemetry.Ring[telemetry.LogEntry]
+	buf   *Ring[LogEntry]
 }
 
 func NewRingHandler(level slog.Level) *RingHandler {
@@ -20,7 +18,7 @@ func NewRingHandler(level slog.Level) *RingHandler {
 	}
 }
 
-func NewRingHandlerWith(buf *telemetry.Ring[telemetry.LogEntry], level slog.Level) *RingHandler {
+func NewRingHandlerWith(buf *Ring[LogEntry], level slog.Level) *RingHandler {
 	return &RingHandler{
 		level: level,
 		buf:   buf,
@@ -37,7 +35,7 @@ func (h *RingHandler) Handle(ctx context.Context, record slog.Record) error {
 		attrs = append(attrs, fmt.Sprintf("%s=%v", a.Key, a.Value))
 		return true
 	})
-	entry := telemetry.LogEntry{
+	entry := LogEntry{
 		Timestamp:  record.Time,
 		Message:    record.Message,
 		Level:      record.Level.String(),
