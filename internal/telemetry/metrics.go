@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"context"
+	"log/slog"
 	"runtime/metrics"
 	"slices"
 	"sync"
@@ -40,9 +41,8 @@ type MetricsSampler struct {
 	samples  []metrics.Sample
 	interval time.Duration
 
-	cancel context.CancelFunc
-	done   chan struct{}
-	once   sync.Once
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
 func NewSampler(
@@ -56,22 +56,17 @@ func NewSampler(
 	}
 }
 
-func (m *MetricsSampler) Start(ctx context.Context) {
-	ctx, m.cancel = context.WithCancel(ctx)
-	m.done = make(chan struct{})
-	go func() {
-		defer close(m.done)
-		m.run(ctx)
-	}()
-}
-
-func (m *MetricsSampler) run(ctx context.Context) {
+func (m *MetricsSampler) Run(ctx context.Context) error {
 	ticker := time.NewTicker(m.interval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			slog.Debug("sampler context was cancelled", "error", ctx.Err())
+			return ctx.Err()
+		case <-m.done:
+			slog.Debug("received done message for sampler")
+			return nil
 		case <-ticker.C:
 			metrics.Read(m.samples)
 			samples := slices.Clone(m.samples)
@@ -81,13 +76,11 @@ func (m *MetricsSampler) run(ctx context.Context) {
 }
 
 func (m *MetricsSampler) Close() error {
-	m.once.Do(func() {
-		if m.cancel != nil {
-			m.cancel()
-			<-m.done
+	m.closeOnce.Do(func() {
+		close(m.done)
+		if err := m.Broker.Shutdown(); err != nil {
+			slog.Error("failed to shutdown metric's sampler broker", "error", err)
 		}
-
-		m.Broker.Shutdown()
 	})
 
 	return nil

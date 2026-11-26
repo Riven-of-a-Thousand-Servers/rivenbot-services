@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -20,14 +21,22 @@ type Tracker struct {
 	// receive data from it
 	sampler *MetricsSampler
 
-	gcCyclesHistogram *Histogram
-	heapTimeseries    *Timeseries[uint64]
+	// gcHistogram represents the durations between garbage
+	// collections separated by duration buckets
+	gcHistogram *Histogram
+
+	// heapTimeseries samples the heap size every interval
+	// amount to see how memory is doing
+	heapTimeseries *Timeseries[uint64]
 
 	cleanup   []any
+	cancel    context.CancelFunc
 	closeOnce sync.Once
 
-	// Wait group for all running histograms and timeseries
-	wg sync.WaitGroup
+	// waitgroup that all runnable attributes parts of the tracker use
+	// to synchronize and share execution
+	wg      sync.WaitGroup
+	runOnce sync.Once
 
 	startedAt time.Time
 	gauges    []Gauge
@@ -72,6 +81,12 @@ func NewTracker(buf *Ring[LogEntry], totalFiles int) (*Tracker, error) {
 		startedAt:  time.Now(),
 	}
 
+	defer func() {
+		if err != nil {
+			t.Close()
+		}
+	}()
+
 	sampler := NewSampler(Samples, 500*time.Millisecond)
 	if err := t.AddToCleanup(sampler.Close); err != nil {
 		return nil, err
@@ -86,8 +101,8 @@ func NewTracker(buf *Ring[LogEntry], totalFiles int) (*Tracker, error) {
 	}
 
 	histSub, histUnsub := sampler.Subscribe()
-	t.gcCyclesHistogram = NewHistogram(SchedulerLatencies, histSub, buckets...)
-	if err := t.AddToCleanup(t.gcCyclesHistogram.Close, histUnsub); err != nil {
+	t.gcHistogram = NewHistogram(SchedulerLatencies, histSub, buckets...)
+	if err := t.AddToCleanup(t.gcHistogram.Close, histUnsub); err != nil {
 		return nil, err
 	}
 
@@ -103,6 +118,17 @@ func NewTracker(buf *Ring[LogEntry], totalFiles int) (*Tracker, error) {
 	}
 
 	return t, nil
+}
+
+func (t *Tracker) Run(ctx context.Context) error {
+	t.runOnce.Do(func() {
+		ctx, t.cancel = context.WithCancel(ctx)
+		t.wg.Go(func() { t.sampler.Run(ctx) })
+		t.wg.Go(func() { t.gcHistogram.Run(ctx) })
+		t.wg.Go(func() { t.heapTimeseries.Run(ctx) })
+	})
+
+	return nil
 }
 
 // AddTask registers a Task and subsequently returns a pointer to it
@@ -161,7 +187,7 @@ func (t *Tracker) SnapshotSummary() Summary {
 
 	return Summary{
 		Runtime: RuntimeStats{
-			SchedLatencies: t.gcCyclesHistogram.getSample(),
+			SchedLatencies: t.gcHistogram.getSample(),
 			HeapUsedBytes:  t.heapTimeseries.Last(20), // TODO: Need to dynamically adjust this
 		},
 		App: AppStats{
@@ -219,22 +245,6 @@ func (t *Tracker) RegisterGauge(name, unit string, fn GaugeFunc) (unregister fun
 	}
 }
 
-func (t *Tracker) Close() error {
-	var err error
-	t.closeOnce.Do(func() {
-		var errs []error
-		for _, c := range slices.Backward(t.cleanup) {
-			if err := cleanupRunAny(c); err != nil {
-				errs = append(errs, err)
-			}
-		}
-
-		err = errors.Join(errs...)
-	})
-
-	return err
-}
-
 func cleanupRunAny(a any) error {
 	switch f := a.(type) {
 	case func() error:
@@ -262,9 +272,24 @@ func (t *Tracker) AddToCleanup(closers ...any) error {
 	return nil
 }
 
-func wrap(f func()) func() error {
-	return func() error {
-		f()
-		return nil
-	}
+func (t *Tracker) Close() error {
+	var err error
+	t.closeOnce.Do(func() {
+		if t.cancel != nil {
+			t.cancel()
+		}
+
+		t.wg.Wait()
+
+		var errs []error
+		for _, c := range slices.Backward(t.cleanup) {
+			if e := cleanupRunAny(c); e != nil {
+				errs = append(errs, e)
+			}
+		}
+
+		err = errors.Join(errs...)
+	})
+
+	return err
 }

@@ -56,7 +56,7 @@ func (h *Histogram) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			slog.Debug("Histogram context was cancelled", "error", ctx.Err())
+			slog.Debug("histogram context was cancelled", "error", ctx.Err())
 			return ctx.Err()
 		// Each tick we sample and save the latest entry to the atomic.Pointer entry
 		// in the Histogram
