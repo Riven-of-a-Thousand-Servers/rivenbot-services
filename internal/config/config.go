@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"pgcr-processing-service/internal/utils"
 )
 
 const (
@@ -95,18 +97,21 @@ func Find() (string, error) {
 }
 
 func Init() (*Config, error) {
-	var cfg *Config = new(Config)
-
-	if existing, err := Load(); err != nil {
+	existing, err := Load()
+	if err != nil {
 		return nil, err
-	} else if existing != nil {
+	}
+
+	if existing != nil {
 		return existing, nil
 	}
 
+	cfg := new(Config)
 	cfg.Defaults()
+
 	cwd, err := os.Getwd()
 	if err != nil {
-		return cfg, err
+		return nil, err
 	}
 
 	dir := filepath.Join(cwd, configDirName)
@@ -114,18 +119,13 @@ func Init() (*Config, error) {
 		return nil, err
 	}
 
-	path := filepath.Join(dir, configFileName)
-	tmpPath := path + ".tmp"
-	tmpFile, err := os.CreateTemp(tmpPath, "")
+	data, err := json.MarshalIndent(cfg, "", " ")
 	if err != nil {
 		return nil, err
 	}
+	data = append(data, '\n')
 
-	if err := json.NewEncoder(tmpFile).Encode(&cfg); err != nil {
-		return nil, err
-	}
-
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := utils.AtomicFileWrite(filepath.Join(dir, configFileName), data, 0o644); err != nil {
 		return nil, err
 	}
 

@@ -9,3 +9,6 @@ bin/*
 
 # Ignore coverage files
 *.out
+
+# Ignore .rivenbot files
+.rivenbot/**
