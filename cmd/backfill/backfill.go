@@ -24,9 +24,9 @@ func NewCommand(a app.App) *cobra.Command {
 		SilenceUsage: true,
 	}
 
-	bApp, err := app.NewBackfill(a.GetConfig().Backfill)
+	bApp, err := app.NewBackfill(a.GetConfig())
 	if err != nil {
-		slog.Error("Error creating backfill")
+		slog.Error("Error creating backfill", "error", err)
 		os.Exit(1)
 	}
 	cmd.AddCommand(

@@ -1,6 +1,7 @@
 package config
 
 type BackfillConfig struct {
+	DeadLetter DeadLetterConfig `json:"deadLetter"`
 	TuiEnabled bool             `json:"tui"`
 	WalkerOpts FileWalkerConfig `json:"walker"`
 	Processor  ProcessorConfig  `json:"processor"`
@@ -16,4 +17,8 @@ type FileWalkerConfig struct {
 type ProcessorConfig struct {
 	Workers int    `json:"workers"`
 	ApiKey  string `json:"apiKey"`
+}
+
+type DeadLetterConfig struct {
+	Filename string `json:"name"`
 }

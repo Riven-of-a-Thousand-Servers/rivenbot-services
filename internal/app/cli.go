@@ -28,7 +28,7 @@ var _ App = (*Cli)(nil)
 func NewCli() *Cli { return &Cli{out: os.Stdout, in: os.Stdin, err: os.Stderr} }
 
 func (c *Cli) Initialize() error {
-	cfg, err := config.Load()
+	cfg, err := config.Init()
 	if err != nil {
 		return err
 	}

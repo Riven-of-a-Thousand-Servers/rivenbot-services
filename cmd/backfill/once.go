@@ -38,6 +38,9 @@ func newOnceCommand(b app.Backfill) *cobra.Command {
 			if !log.Initialized() {
 				log.Setup(logFile)
 			}
+
+			defer b.Close()
+
 			return b.RunOnce(cmd.Context(), file)
 		},
 	}

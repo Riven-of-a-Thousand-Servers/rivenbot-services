@@ -21,13 +21,13 @@ type Provider interface {
 
 type Config struct {
 	Path     string
-	Database *DatabaseConfig `json:"db"`
-	Logging  *LoggingConfig  `json:"log"`
-	Backfill *BackfillConfig `json:"backfill"`
+	Database DatabaseConfig `json:"db"`
+	Logging  LoggingConfig  `json:"log"`
+	Backfill BackfillConfig `json:"backfill"`
 }
 
 type LoggingConfig struct {
-	FileName string `json:"fileName"`
+	FileName string `json:"name"`
 }
 
 type DatabaseConfig struct {
@@ -95,7 +95,7 @@ func Find() (string, error) {
 }
 
 func Init() (*Config, error) {
-	var cfg Config
+	var cfg *Config = new(Config)
 
 	if existing, err := Load(); err != nil {
 		return nil, err
@@ -106,7 +106,7 @@ func Init() (*Config, error) {
 	cfg.Defaults()
 	cwd, err := os.Getwd()
 	if err != nil {
-		return &cfg, err
+		return cfg, err
 	}
 
 	dir := filepath.Join(cwd, configDirName)
@@ -129,7 +129,7 @@ func Init() (*Config, error) {
 		return nil, err
 	}
 
-	return &cfg, nil
+	return cfg, nil
 }
 
 func Load() (*Config, error) {

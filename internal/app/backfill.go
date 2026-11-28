@@ -27,7 +27,7 @@ import (
 var deadLetterFileName = "deadletter.log"
 
 type BackfillApp struct {
-	config  *config.BackfillConfig
+	config  *config.Config
 	tracker *telemetry.Tracker
 	cache   *cache.InMemoryCache
 	mapper  *mapper.PgcrMapper
@@ -41,43 +41,38 @@ type BackfillApp struct {
 
 var _ Backfill = (*BackfillApp)(nil)
 
-func NewBackfill(cfg *config.BackfillConfig) (*BackfillApp, error) {
-	var err error
-
-	app := &BackfillApp{}
-
+func NewBackfill(cfg *config.Config) (*BackfillApp, error) {
 	cache := cache.NewInMemoryCache()
 	mapper := mapper.New(cache)
 
-	app.cache = cache
-	app.mapper = mapper
-	app.config = cfg
-
-	app.quarantineFile, err = os.Open(deadLetterFileName)
-	if err != nil {
-		return nil, err
-	}
-
-	app.cleanup = append(app.cleanup,
-		app.quarantineFile.Close,
-		app.tracker.Close,
-	)
-
-	return app, nil
+	return &BackfillApp{
+		mapper: mapper,
+		cache:  cache,
+	}, nil
 }
 
 func (a *BackfillApp) RunOnce(ctx context.Context, file string) error {
-	dbUrl := ""
-	conn, err := db.Connect(ctx, dbUrl)
+	var err error
+	a.quarantineFile, err = os.Open(a.config.Backfill.DeadLetter.Filename)
+	if err != nil {
+		slog.Error("failed to open quarantine file", "error", err)
+		return err
+	}
+
+	a.cleanup = append(a.cleanup, a.quarantineFile.Close)
+
+	conn, err := db.Connect(ctx, a.config.Database.URL)
 	if err != nil {
 		return err
 	}
+
 	a.cleanup = append(a.cleanup, conn.Close)
 
 	queries, err := db.Prepare(ctx, conn)
 	if err != nil {
 		return err
 	}
+
 	a.cleanup = append(a.cleanup, queries.Close)
 
 	var eg *errgroup.Group
@@ -89,8 +84,8 @@ func (a *BackfillApp) RunOnce(ctx context.Context, file string) error {
 	}
 
 	files, err := walker.WalkAndAccumulate(
-		a.config.WalkerOpts.RootDir,
-		a.config.WalkerOpts.Filepattern,
+		a.config.Backfill.WalkerOpts.RootDir,
+		a.config.Backfill.WalkerOpts.Filepattern,
 		dirFilters...,
 	)
 	if err != nil {
@@ -98,15 +93,13 @@ func (a *BackfillApp) RunOnce(ctx context.Context, file string) error {
 		return err
 	}
 
-	tracker, err := telemetry.NewTracker(len(files))
+	a.tracker, err = telemetry.NewTracker(len(files))
 	if err != nil {
 		slog.Error("failed to create telemetry tracker", "error", err)
 		return err
 	}
 
-	a.tracker = tracker
-
-	apiKey := a.config.Processor.ApiKey
+	apiKey := a.config.Backfill.Processor.ApiKey
 	if apiKey == "" {
 		return fmt.Errorf("API key not set for the current config")
 	}
